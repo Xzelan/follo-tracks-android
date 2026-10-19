@@ -96,6 +96,8 @@ class MainActivity :
   private var bannerBasePaddingTop = 0
   private var cardBaseMarginBottom = 0
   private var state: Banner? = null
+  /** True while a system permission prompt is up; the banner then says "Setting up" instead of red. */
+  private var promptInFlight = false
 
   /** What the banner is showing; [kind] decides what the one button does. */
   private data class Banner(
@@ -115,6 +117,7 @@ class MainActivity :
     NEED_BATTERY,
     SHARING,
     STANDBY,
+    SETTING_UP,
   }
 
   private val serviceConnection =
@@ -300,6 +303,7 @@ class MainActivity :
 
   override fun onResume() {
     super.onResume()
+    promptInFlight = false // a system prompt pauses us; being resumed means it has gone
     map.onResume()
     if (requirementsChecker.hasLocationPermissions()) {
       viewModel.requestLocationUpdates()
@@ -361,6 +365,8 @@ class MainActivity :
         !notificationPermissionRequester.hasPermission() &&
             !preferences.userDeclinedEnableNotificationPermissions
     ) {
+      promptInFlight = true
+      render()
       notificationPermissionRequester.requestNotificationPermission()
       return
     }
@@ -379,6 +385,8 @@ class MainActivity :
   }
 
   private fun requestLocation() {
+    promptInFlight = true
+    render()
     locationPermissionRequester.requestLocationPermissions(0, this) {
       shouldShowRequestPermissionRationale(it)
     }
@@ -395,6 +403,8 @@ class MainActivity :
         .setTitle(R.string.follo_bg_rationale_title)
         .setMessage(R.string.follo_bg_rationale_msg)
         .setPositiveButton(android.R.string.ok) { _, _ ->
+          promptInFlight = true
+          render()
           backgroundLocationPermissionRequester.requestLocationPermissions(this) { false }
         }
         .setNegativeButton(android.R.string.cancel) { _, _ ->
@@ -448,6 +458,8 @@ class MainActivity :
     fun s(id: Int) = getString(id)
     if (!viewModel.setupCompleted.value)
         return Banner(Kind.NOT_SET_UP, grey, s(R.string.follo_not_setup_title), s(R.string.follo_not_setup_sub))
+    if (promptInFlight)
+        return Banner(Kind.SETTING_UP, grey, s(R.string.follo_setting_up_title), s(R.string.follo_setting_up_sub))
     if (!requirementsChecker.hasLocationPermissions())
         return Banner(Kind.NEED_LOCATION, red, s(R.string.follo_action_title), s(R.string.follo_perm_location_sub), s(R.string.follo_perm_location_btn))
     if (!requirementsChecker.isLocationServiceEnabled())
@@ -462,7 +474,9 @@ class MainActivity :
         viewModel.folloStatus.value
             ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }
             ?.message
-    if (viewModel.isMoving) {
+    // The server's word wins: it knows the storage box. Without a server word yet, Move = sharing.
+    val sharing = if (server != null) server.state == "sharing" else viewModel.isMoving
+    if (sharing) {
       val queued = viewModel.queueLength.value
       val sub =
           when {

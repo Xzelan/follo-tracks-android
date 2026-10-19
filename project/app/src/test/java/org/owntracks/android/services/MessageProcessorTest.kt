@@ -27,6 +27,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
@@ -145,7 +146,7 @@ class MessageProcessorTest {
           parser = mock<Parser> {},
           scheduler = mock<Scheduler> {},
           endpointStateRepo = EndpointStateRepo(),
-          folloStatusRepo = FolloStatusRepo(),
+          folloStatusRepo = FolloStatusRepo(mock<Context> { on { getSharedPreferences(any(), any()) } doReturn mock<android.content.SharedPreferences> { on { getString(any(), anyOrNull()) } doReturn null; on { getLong(any(), any()) } doReturn 0L } }, Parser()),
           outgoingQueueIdlingResource =
               mock<ThresholdIdlingResourceInterface> { on { isIdleNow } doReturn true },
           importConfigurationIdlingResource = SimpleIdlingResource("import", true),

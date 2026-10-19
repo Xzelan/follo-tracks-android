@@ -5,6 +5,8 @@
 
     <string name="follo_not_setup_title">Not set up yet</string>
     <string name="follo_not_setup_sub">Tap your FOLLO link in Messages</string>
+    <string name="follo_setting_up_title">Setting up</string>
+    <string name="follo_setting_up_sub">Answer Android\'s questions; FOLLO Tracks needs each one</string>
 
     <string name="follo_sharing_title">Sharing your location with FOLLO</string>
     <string name="follo_sharing_sub"> </string>

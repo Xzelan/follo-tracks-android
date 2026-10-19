@@ -418,7 +418,7 @@ constructor(
                         Timber.d("Message sent successfully: $message")
                         lastMessageStatus = LastMessageStatus.Success
                         if (message is MessageLocation) {
-                          folloStatusRepo.lastSentAt.value = System.currentTimeMillis()
+                          folloStatusRepo.markSent()
                         }
                         if (message !is MessageWaypoint) {
                           messageReceivedIdlingResource.add(message)
@@ -581,7 +581,7 @@ constructor(
   private fun processIncomingMessage(message: MessageFollo) {
     processInOrder {
       Timber.d("Received FOLLO status $message")
-      folloStatusRepo.status.value = FolloStatusRepo.Status(message, System.currentTimeMillis())
+      folloStatusRepo.setStatus(message)
       message.name?.takeIf { it.isNotBlank() && it != preferences.displayName }?.let {
         preferences.displayName = it
       }
