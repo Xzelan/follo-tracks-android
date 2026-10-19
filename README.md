@@ -1,5 +1,7 @@
 # FOLLO Tracks (Android)
 
+_The upstream OwnTracks README is kept at [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md)._
+
 FOLLO Tracks is Find Our Lost Loved Ones' build of the OwnTracks Android app
 (https://github.com/owntracks/android, Eclipse Public License 1.0). It records
 search volunteers' positions during declared search hours, inside the declared
