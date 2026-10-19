@@ -522,7 +522,7 @@ class MainActivity :
           else -> server.state == "sharing"
         }
     if (sharing) {
-      val queued = viewModel.queueLength.value
+      val queued = backlog()
       val sub =
           when {
             queued == 1 -> s(R.string.follo_offline_sub_one)
@@ -562,13 +562,25 @@ class MainActivity :
     }
   }
 
+  /**
+   * Positions really held back for want of signal. Every post sits in the queue for a moment while it
+   * is sent (every 5 s in Move), so a non-empty queue alone would flash "No signal" on each send; it
+   * only counts once nothing has gone through for [NO_SIGNAL_AFTER_MS].
+   */
+  private fun backlog(): Int {
+    val queued = viewModel.queueLength.value
+    val last = viewModel.lastSentAt.value
+    return if (queued > 0 && System.currentTimeMillis() - last > NO_SIGNAL_AFTER_MS) queued else 0
+  }
+
   private fun render() {
     if (!::binding.isInitialized) return
     val b = currentBanner()
     state = b
     binding.banner.setBackgroundColor(b.color)
-    binding.title.text = b.title
-    binding.sub.text = b.sub
+    // Only touch a view when its content changes: render() runs on every post (5 s in Move).
+    if (binding.title.text.toString() != b.title) binding.title.text = b.title
+    if (binding.sub.text.toString() != b.sub) binding.sub.text = b.sub
     binding.sub.visibility = if (b.sub.isBlank()) View.GONE else View.VISIBLE
     binding.action.visibility = if (b.button == null) View.GONE else View.VISIBLE
     binding.action.text = b.button ?: ""
@@ -598,10 +610,11 @@ class MainActivity :
                   ),
               )
         }
-    val queued = viewModel.queueLength.value
+    val queued = backlog()
     if (queued > 0) parts += getString(R.string.follo_waiting, queued)
     viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }
-    binding.last.text = parts.joinToString(" · ")
+    val text = parts.joinToString(" · ")
+    if (binding.last.text.toString() != text) binding.last.text = text
   }
 
   // ── Map ───────────────────────────────────────────────────────────────────────────────
@@ -696,8 +709,13 @@ class MainActivity :
   }
 
   /** The search area's storage box from the server: the line where sharing starts and stops. */
+  private var drawnBox: String? = null
+
   private fun drawAreaBox(status: org.owntracks.android.model.messages.MessageFollo?) {
     if (!::map.isInitialized) return
+    val key = status?.box?.takeIf { status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true }
+    if (key == drawnBox) return // the same box arrives with every reply; redrawing it each time flickers
+    drawnBox = key
     map.overlays.removeAll { (it is Polygon && it.id == AREA_ID) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
     val b = status?.boxBounds()
     if (status != null && b != null && status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true) {
@@ -754,14 +772,23 @@ class MainActivity :
       val id = CONTACT_PREFIX + contact.id
       val existing = map.overlays.firstOrNull { it is Marker && it.id == id } as Marker?
       if (existing != null) {
-        existing.position = point
-        existing.icon = bitmap.toDrawable(resources)
+        // Every reply repeats the teammates (5 s in Move): touch the marker only when it really moved or
+        // its picture changed, or it blinks.
+        val moved = existing.position.latitude != point.latitude || existing.position.longitude != point.longitude
+        val newPicture = existing.relatedObject !== bitmap
+        if (!moved && !newPicture) return@launch
+        if (moved) existing.position = point
+        if (newPicture) {
+          existing.icon = bitmap.toDrawable(resources)
+          existing.relatedObject = bitmap
+        }
       } else if (!isDestroyed) {
         map.overlays.add(
             Marker(map).apply {
               this.id = id
               position = point
               icon = bitmap.toDrawable(resources)
+              relatedObject = bitmap
               title = contact.displayName
               setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
               infoWindow = null
@@ -775,6 +802,7 @@ class MainActivity :
   companion object {
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
+    private const val NO_SIGNAL_AFTER_MS = 30_000L
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */
