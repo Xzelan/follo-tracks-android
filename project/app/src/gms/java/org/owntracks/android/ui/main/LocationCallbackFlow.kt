@@ -44,7 +44,7 @@ fun locationCallbackFlow(client: FusedLocationProviderClient): Flow<Location> = 
           LocationRequest(
                   smallestDisplacement = 1f,
                   priority = LocatorPriority.HighAccuracy,
-                  interval = Duration.ofSeconds(2),
+                  interval = Duration.ofSeconds(1), // FOLLO: smooth map following while the screen is open
                   waitForAccurateLocation = false,
               )
               .toGMSLocationRequest(),

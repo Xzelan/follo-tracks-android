@@ -38,6 +38,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -211,9 +212,7 @@ class MainActivity :
 
     setUpMap()
     binding.action.setOnClickListener { onActionClicked() }
-    binding.card.setOnClickListener {
-      viewModel.currentLocation.value?.let { map.controller.animateTo(it.toGeoPoint()) }
-    }
+    binding.card.setOnClickListener { recentre() }
 
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -647,6 +646,22 @@ class MainActivity :
     map = binding.map
     map.setTileSource(FolloTileSource(viewModel.tileUrl))
     map.setMultiTouchControls(true)
+    // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
+    // tapped. Pinch-zooming keeps following.
+    var downX = 0f
+    var downY = 0f
+    val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+    map.setOnTouchListener { _, e ->
+      when (e.actionMasked) {
+        android.view.MotionEvent.ACTION_DOWN -> {
+          downX = e.x
+          downY = e.y
+        }
+        android.view.MotionEvent.ACTION_MOVE ->
+            if (e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) > slop) followPaused = true
+      }
+      false
+    }
     map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
@@ -694,29 +709,53 @@ class MainActivity :
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
 
   private var centredOnce = false
+  /** True once the volunteer drags the map themselves; tapping the card brings following back. */
+  private var followPaused = false
 
   /**
-   * The map stays still and the dot moves over it; it only re-centres when the dot nears the edge.
-   * Following every fix (osmdroid's follow mode) slid the whole map with each few metres of GPS
-   * wobble, which is distracting while navigating (Alex, 19 Oct).
+   * The visible middle of the map (between the banner and the card), where the dot is kept, and the
+   * radius of the invisible circle around it, in map-view pixels.
+   */
+  private fun anchor(): Triple<Float, Float, Float> {
+    val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
+    val bottom = (binding.card.top - map.top).takeIf { it > top } ?: map.height
+    val visible = bottom - top
+    return Triple(map.width / 2f, (top + bottom) / 2f, LEASH_FRACTION * minOf(map.width.toFloat(), visible))
+  }
+
+  /**
+   * Alex's "invisible circle" (19 Oct): the dot moves freely inside a circle around the visible middle
+   * of the map and the map stays still; once the dot reaches the circle the map glides along with it,
+   * keeping it on the circle's edge. Stepping back inside stops the map until the far side is reached.
    */
   private fun keepInView(l: Location) {
-    if (!::map.isInitialized || map.width == 0) return
-    val p = l.toGeoPoint()
+    if (!::map.isInitialized || map.width == 0 || map.height == 0 || followPaused) return
+    val pt = map.projection.toPixels(l.toGeoPoint(), null)
+    val (ax, ay, r) = anchor()
+    val dx = pt.x - ax
+    val dy = pt.y - ay
     if (!centredOnce) {
-      map.controller.setCenter(p)
+      // First fix: put the dot in the middle at once (no animation from wherever the map was).
+      map.controller.setCenter(map.projection.fromPixels((map.width / 2f + dx).roundToInt(), (map.height / 2f + dy).roundToInt()))
       centredOnce = true
       return
     }
-    val bb = map.boundingBox
-    val dLat = (bb.latNorth - bb.latSouth) * EDGE_FRACTION
-    val dLon = (bb.lonEast - bb.lonWest) * EDGE_FRACTION
-    val nearEdge =
-        p.latitude > bb.latNorth - 1.5 * dLat || // the banner covers the top of the map
-            p.latitude < bb.latSouth + 1.5 * dLat || // and the card the bottom
-            p.longitude > bb.lonEast - dLon ||
-            p.longitude < bb.lonWest + dLon
-    if (nearEdge) map.controller.animateTo(p)
+    val dist = hypot(dx, dy)
+    if (dist <= r) return
+    val k = (dist - r) / dist // move the map just enough to put the dot back on the circle
+    val c = map.projection.fromPixels((map.width / 2f + dx * k).roundToInt(), (map.height / 2f + dy * k).roundToInt())
+    map.controller.animateTo(c, null, PAN_MS)
+  }
+
+  /** Card tap: follow again and bring the dot back to the middle. */
+  private fun recentre() {
+    followPaused = false
+    val l = viewModel.currentLocation.value ?: return
+    if (!::map.isInitialized || map.width == 0) return
+    val pt = map.projection.toPixels(l.toGeoPoint(), null)
+    val (ax, ay, _) = anchor()
+    val c = map.projection.fromPixels((map.width / 2f + pt.x - ax).roundToInt(), (map.height / 2f + pt.y - ay).roundToInt())
+    map.controller.animateTo(c, null, PAN_MS)
   }
 
   /**
@@ -847,8 +886,10 @@ class MainActivity :
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
     private const val NO_SIGNAL_AFTER_MS = 10_000L
-    /** How close (fraction of the visible map) the dot may get to an edge before the map re-centres. */
-    private const val EDGE_FRACTION = 0.15
+    /** Radius of the invisible circle, as a fraction of the visible map's shorter side. */
+    private const val LEASH_FRACTION = 0.25f
+    /** How long one glide takes; about the time between fixes, so the map moves continuously. */
+    private const val PAN_MS = 900L
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */
