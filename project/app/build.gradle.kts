@@ -73,13 +73,15 @@ android {
 
   androidResources { generateLocaleConfig = true }
 
-  if (!System.getenv("KEYSTORE_PASSPHRASE").isNullOrBlank()) {
+  // FOLLO: the upload key lives outside the repo (~/.config/follo on the build PC, a secret in CI).
+  // FOLLO_KEYSTORE = path to the .jks, FOLLO_KEYSTORE_PASS = its store + key password, alias "upload".
+  if (!System.getenv("FOLLO_KEYSTORE").isNullOrBlank() && !System.getenv("FOLLO_KEYSTORE_PASS").isNullOrBlank()) {
     signingConfigs {
       register("release") {
         keyAlias = "upload"
-        keyPassword = System.getenv("KEYSTORE_PASSPHRASE")
-        storeFile = file("../owntracks.release.keystore.jks")
-        storePassword = System.getenv("KEYSTORE_PASSPHRASE")
+        keyPassword = System.getenv("FOLLO_KEYSTORE_PASS")
+        storeFile = file(System.getenv("FOLLO_KEYSTORE")!!)
+        storePassword = System.getenv("FOLLO_KEYSTORE_PASS")
         enableV1Signing = true
         enableV2Signing = true
         enableV3Signing = true
