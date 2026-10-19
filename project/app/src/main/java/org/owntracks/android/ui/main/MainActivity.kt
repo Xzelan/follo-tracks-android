@@ -152,6 +152,7 @@ class MainActivity :
           {
             preferences.userDeclinedEnableBackgroundLocationPermissions = false
             service?.reInitializeLocationRequests()
+            startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
             render()
           },
           {
@@ -176,6 +177,9 @@ class MainActivity :
       viewModel.requestLocationUpdates()
       myLocationOverlay?.enableMyLocation()
       service?.reInitializeLocationRequests()
+      // First chance to tell the server this phone exists: the post queued at setup time was
+      // dropped because there was no location permission yet.
+      if (preferences.setupCompleted) startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
     }
     render()
   }
