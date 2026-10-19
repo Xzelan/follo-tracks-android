@@ -27,7 +27,6 @@ import org.owntracks.android.preferences.types.MqttQos
 import org.owntracks.android.preferences.types.ReverseGeocodeProvider
 import org.owntracks.android.preferences.types.StringMaxTwoAlphaNumericChars
 import org.owntracks.android.test.SimpleIdlingResource
-import org.owntracks.android.ui.map.MapLayerStyle
 import timber.log.Timber
 
 @Singleton
@@ -274,7 +273,8 @@ constructor(
 
   @Preference var useGNSSInSignificantMonitoringMode: Boolean by preferencesStore
 
-  @Preference var mapLayerStyle: MapLayerStyle by preferencesStore
+  // FOLLO: XYZ tile URL template for the one map; set by the server, never by the user.
+  @Preference(exportModeMqtt = false) var mapTileUrl: String by preferencesStore
 
   // Maximum plausible ground speed in km/h between consecutive published fixes. 0 disables the
   // implausible-speed (teleport) filter.
@@ -361,6 +361,8 @@ constructor(
   // Preferences we store but don't export / import
   var firstStart: Boolean by preferencesStore
   var setupCompleted: Boolean by preferencesStore
+  // FOLLO: the volunteer's name as the server knows it (from the setup link); shown on the card only.
+  var displayName: String by preferencesStore
 
   // Needs to be after all the preferences are declared, otherwise the delegates are null.
   init {

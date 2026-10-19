@@ -13,11 +13,6 @@ plugins {
 
 apply<EspressoMetadataEmbeddingPlugin>()
 
-val googleMapsAPIKey =
-    System.getenv("GOOGLE_MAPS_API_KEY")
-        ?: extra.get("google_maps_api_key")?.toString()
-        ?: "PLACEHOLDER_API_KEY"
-
 val gmsImplementation: Configuration by configurations.creating
 
 val versionNameValue = "0.1.0"
@@ -103,7 +98,6 @@ android {
               file("proguard-rules.pro"),
           ),
       )
-      resValue("string", "GOOGLE_MAPS_API_KEY", googleMapsAPIKey)
       signingConfig = signingConfigs.findByName("release")
     }
 
@@ -117,7 +111,6 @@ android {
               file("proguard-rules.pro"),
           ),
       )
-      resValue("string", "GOOGLE_MAPS_API_KEY", googleMapsAPIKey)
       enableUnitTestCoverage = true
       enableAndroidTestCoverage = true
     }
@@ -208,7 +201,6 @@ android {
     create("gms") {
       dimension = "locationProvider"
       dependencies {
-        gmsImplementation(libs.gms.play.services.maps)
         gmsImplementation(libs.play.services.location)
       }
     }

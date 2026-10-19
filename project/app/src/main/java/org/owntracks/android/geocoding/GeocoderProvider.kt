@@ -31,7 +31,7 @@ import org.owntracks.android.location.LatLng
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.types.ReverseGeocodeProvider
 import org.owntracks.android.services.BackgroundService
-import org.owntracks.android.ui.map.MapActivity
+import org.owntracks.android.ui.main.MainActivity
 import timber.log.Timber
 
 @OptIn(ExperimentalTime::class)
@@ -145,7 +145,7 @@ constructor(
       lastRateLimitedNotificationTime = until
     }
 
-    val activityLaunchIntent = Intent(this.context, MapActivity::class.java)
+    val activityLaunchIntent = Intent(this.context, MainActivity::class.java)
     activityLaunchIntent.action = "android.intent.action.MAIN"
     activityLaunchIntent.addCategory("android.intent.category.LAUNCHER")
     activityLaunchIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP

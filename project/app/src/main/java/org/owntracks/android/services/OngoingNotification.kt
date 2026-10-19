@@ -17,7 +17,7 @@ import org.owntracks.android.R
 import org.owntracks.android.data.EndpointState
 import org.owntracks.android.data.EndpointStatus
 import org.owntracks.android.preferences.types.MonitoringMode
-import org.owntracks.android.ui.map.MapActivity
+import org.owntracks.android.ui.main.MainActivity
 import timber.log.Timber
 
 @OptIn(ExperimentalTime::class)
@@ -31,7 +31,7 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
 
   private val notificationManagerCompat = NotificationManagerCompat.from(context)
   private val resultIntent by lazy {
-    Intent(context, MapActivity::class.java)
+    Intent(context, MainActivity::class.java)
         .setAction("android.intent.action.MAIN")
         .addCategory("android.intent.category.LAUNCHER")
         .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -41,24 +41,6 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
         context,
         0,
         resultIntent,
-        BackgroundService.UPDATE_CURRENT_INTENT_FLAGS,
-    )
-  }
-  private val publishPendingIntent by lazy {
-    PendingIntent.getService(
-        context,
-        0,
-        Intent(context, BackgroundService::class.java)
-            .setAction(BackgroundService.INTENT_ACTION_SEND_LOCATION_USER),
-        BackgroundService.UPDATE_CURRENT_INTENT_FLAGS,
-    )
-  }
-  private val changeMonitoringPendingIntent by lazy {
-    PendingIntent.getService(
-        context,
-        0,
-        Intent(context, BackgroundService::class.java)
-            .setAction(BackgroundService.INTENT_ACTION_CHANGE_MONITORING),
         BackgroundService.UPDATE_CURRENT_INTENT_FLAGS,
     )
   }
@@ -75,16 +57,6 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
           .setOngoing(true)
           .setContentIntent(resultPendingIntent)
           .setStyle(NotificationCompat.BigTextStyle())
-          .addAction(
-              R.drawable.ic_baseline_publish_24,
-              context.getString(R.string.publish),
-              publishPendingIntent,
-          )
-          .addAction(
-              R.drawable.ic_owntracks_80,
-              context.getString(R.string.notificationChangeMonitoring),
-              changeMonitoringPendingIntent,
-          )
           .setSmallIcon(R.drawable.ic_owntracks_80)
           .setSound(null, AudioManager.STREAM_NOTIFICATION)
           .setColor(context.getColor(R.color.OTPrimaryBlue))

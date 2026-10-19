@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FOLLO Tracks strings. Wording agreed with Alex 18 Oct 2026 (design canvas). -->
+<resources>
+    <string name="follo_brand">FOLLO Tracks</string>
+
+    <string name="follo_not_setup_title">Not set up yet</string>
+    <string name="follo_not_setup_sub">Tap your FOLLO link in Messages</string>
+
+    <string name="follo_sharing_title">Sharing your location with FOLLO</string>
+    <string name="follo_sharing_sub"> </string>
+    <string name="follo_offline_sub">No signal. %1$d positions saved, sent when back in range</string>
+    <string name="follo_offline_sub_one">No signal. 1 position saved, sent when back in range</string>
+
+    <string name="follo_standby_title">Standing by</string>
+    <string name="follo_standby_sub">Sharing starts by itself in search hours, inside the search area</string>
+
+    <string name="follo_action_title">Action needed</string>
+    <string name="follo_perm_location_sub">FOLLO Tracks needs your location to record where you search</string>
+    <string name="follo_perm_location_btn">Allow location</string>
+    <string name="follo_location_off_sub">Location is off, so FOLLO can\'t see you</string>
+    <string name="follo_location_off_btn">Turn location on</string>
+    <string name="follo_bg_sub">Location is set to While Using, so tracking stops when your screen locks</string>
+    <string name="follo_bg_btn">Set location to Always</string>
+    <string name="follo_notif_sub">Android needs a notification to keep tracking running</string>
+    <string name="follo_notif_btn">Allow notifications</string>
+    <string name="follo_battery_sub">Battery saving may stop tracking when the screen is off</string>
+    <string name="follo_battery_btn">Allow battery use</string>
+    <string name="follo_battery_howto">Find FOLLO Tracks in the list and choose Don\'t optimise (Samsung: Unrestricted).</string>
+
+    <string name="follo_who">%1$s · tracker %2$s</string>
+    <string name="follo_tracker">Tracker %1$s</string>
+    <string name="follo_last_sent">Last sent %1$s</string>
+    <string name="follo_last_none">Nothing sent yet</string>
+    <string name="follo_battery">Battery %1$d%%</string>
+    <string name="follo_waiting">%1$d waiting to send</string>
+    <string name="follo_recentre">Recentre the map on you</string>
+
+    <string name="follo_setup_title">Set up FOLLO Tracks?</string>
+    <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>
+    <string name="follo_setup_btn">Set up</string>
+    <string name="follo_setup_bad">This isn\'t a FOLLO Tracks setup link.</string>
+    <string name="follo_setup_done">Set up. Sharing starts by itself in search hours.</string>
+
+    <string name="follo_bg_rationale_title">Allow location all the time</string>
+    <string name="follo_bg_rationale_msg">Android will ask next. Choose \"Allow all the time\" so tracking keeps going while the phone is in your pocket. FOLLO only keeps positions during search hours, inside the search area.</string>
+    <string name="follo_loc_rationale_title">Location permission</string>
+    <string name="follo_loc_rationale_msg">FOLLO Tracks records where you walk during a search so the team can see which ground is covered. Please allow precise location.</string>
+    <string name="follo_fix_in_settings">Open app settings</string>
+</resources>

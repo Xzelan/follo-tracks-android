@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="follo_green">#1E6B3A</color>
+    <color name="follo_grey">#3B4240</color>
+    <color name="follo_red">#A8231C</color>
+    <color name="follo_card">#F6F7F3</color>
+    <color name="follo_text">#1B1F1D</color>
+    <color name="follo_subtext">#3D4440</color>
+    <color name="follo_area">#FFD84D</color>
+    <color name="follo_area_fill">#14FFD84D</color>
+    <color name="follo_dot">#2B7CFF</color>
+    <color name="follo_white">#FFFFFF</color>
+</resources>

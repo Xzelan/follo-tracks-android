@@ -18,9 +18,7 @@ import javax.inject.Singleton
 import org.owntracks.android.R
 import org.owntracks.android.geocoding.GeocoderProvider
 import org.owntracks.android.ui.NotificationsStash
-import org.owntracks.android.ui.preferences.ConnectionFragment
-import org.owntracks.android.ui.preferences.PreferencesActivity
-import org.owntracks.android.ui.preferences.PreferencesActivity.Companion.START_FRAGMENT_KEY
+import org.owntracks.android.ui.main.MainActivity
 import timber.log.Timber
 
 /** Implements a PreferencesStore that uses a SharedPreferecnces as a backend. */
@@ -72,9 +70,7 @@ constructor(
               PendingIntent.getActivity(
                   context,
                   0,
-                  Intent(context, PreferencesActivity::class.java)
-                      .addFlags(FLAG_ACTIVITY_NEW_TASK)
-                      .putExtra(START_FRAGMENT_KEY, ConnectionFragment::class.java.name),
+                  Intent(context, MainActivity::class.java).addFlags(FLAG_ACTIVITY_NEW_TASK),
                   PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
               ),
           )

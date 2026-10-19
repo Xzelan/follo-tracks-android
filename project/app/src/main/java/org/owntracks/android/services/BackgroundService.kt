@@ -83,7 +83,7 @@ import org.owntracks.android.support.DateFormatter.formatDate
 import org.owntracks.android.support.RequirementsChecker
 import org.owntracks.android.support.RunThingsOnOtherThreads
 import org.owntracks.android.test.SimpleIdlingResource
-import org.owntracks.android.ui.map.MapActivity
+import org.owntracks.android.ui.main.MainActivity
 import timber.log.Timber
 
 @AndroidEntryPoint
@@ -455,7 +455,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       return
     }
     val activityLaunchIntent =
-        Intent(applicationContext, MapActivity::class.java)
+        Intent(applicationContext, MainActivity::class.java)
             .setAction("android.intent.action.MAIN")
             .addCategory("android.intent.category.LAUNCHER")
             .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -556,7 +556,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
             PendingIntent.getActivity(
                 this,
                 System.currentTimeMillis().toInt() / 1000,
-                Intent(this, MapActivity::class.java),
+                Intent(this, MainActivity::class.java),
                 UPDATE_CURRENT_INTENT_FLAGS,
             )
         )
