@@ -57,7 +57,7 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
           .setOngoing(true)
           .setContentIntent(resultPendingIntent)
           .setStyle(NotificationCompat.BigTextStyle())
-          .setSmallIcon(R.drawable.ic_owntracks_80)
+          .setSmallIcon(R.drawable.ic_follo_notif)
           .setSound(null, AudioManager.STREAM_NOTIFICATION)
           .setColor(context.getColor(R.color.follo_green))
           .setCategory(NotificationCompat.CATEGORY_SERVICE)

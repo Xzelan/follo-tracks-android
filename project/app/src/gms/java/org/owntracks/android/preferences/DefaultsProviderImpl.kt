@@ -13,6 +13,8 @@ class DefaultsProviderImpl : DefaultsProvider {
       // A phone that is not set up yet must not try an MQTT broker; FOLLO is HTTP only.
       Preferences::mode -> ConnectionMode.HTTP
       Preferences::notificationEvents -> false
+      // The notification title is the banner wording, never the coordinates/address.
+      Preferences::notificationLocation -> false
       Preferences::reverseGeocodeProvider -> ReverseGeocodeProvider.None
       else -> super.getDefaultValue<T>(preferences, property)
     }
