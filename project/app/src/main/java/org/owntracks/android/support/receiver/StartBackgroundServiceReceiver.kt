@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import org.owntracks.android.preferences.Preferences
@@ -33,6 +34,18 @@ class StartBackgroundServiceReceiver : BroadcastReceiver() {
         (Intent.ACTION_MY_PACKAGE_REPLACED == intent.action ||
             Intent.ACTION_BOOT_COMPLETED == intent.action) && preferences.autostartOnBoot
     ) {
+      // FOLLO: starting a location foreground service from the background needs location "all
+      // the time"; without it Android refuses, so leave the start to the next app launch.
+      if (
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+              ContextCompat.checkSelfPermission(
+                  context,
+                  android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+              ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+      ) {
+        Timber.w("Not starting at ${intent.action}: no background location permission")
+        return
+      }
       Timber.v("android.intent.action.BOOT_COMPLETED received")
       val startIntent = Intent(context, BackgroundService::class.java)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

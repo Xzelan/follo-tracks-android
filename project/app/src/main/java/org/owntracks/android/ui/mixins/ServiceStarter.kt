@@ -12,6 +12,12 @@ interface ServiceStarter {
 
   class Impl : ServiceStarter {
     override fun startService(context: Context, action: String?, intent: Intent?) {
+      // FOLLO: the service runs as a "location" foreground service, which Android only allows
+      // with a location permission; without one there is nothing for it to do yet anyway.
+      if (!hasLocationPermission(context)) {
+        Timber.d("not starting the service (no location permission yet), action $action")
+        return
+      }
       Timber.d("requesting service start with action $action")
       ContextCompat.startForegroundService(
           context,
@@ -22,3 +28,13 @@ interface ServiceStarter {
     }
   }
 }
+
+internal fun hasLocationPermission(context: Context): Boolean =
+    listOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+        .any {
+          ContextCompat.checkSelfPermission(context, it) ==
+              android.content.pm.PackageManager.PERMISSION_GRANTED
+        }

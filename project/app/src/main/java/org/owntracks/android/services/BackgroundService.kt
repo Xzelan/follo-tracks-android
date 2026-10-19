@@ -11,7 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
 import android.graphics.Typeface
 import android.location.Location
 import android.os.Binder
@@ -412,12 +412,27 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   }
 
   private fun startForegroundService() {
+    // FOLLO: a "location" foreground service may only be promoted while the app holds a location
+    // permission. Callers start the service only then (ServiceStarter, boot receiver); this guard
+    // and the SecurityException catch below cover a permission revoked in between.
+    if (!requirementsChecker.hasLocationPermissions()) {
+      Timber.w("Not promoting to a foreground service: no location permission")
+      return
+    }
+    try {
+      promoteToForeground()
+    } catch (e: SecurityException) {
+      Timber.e(e, "Foreground service of type location refused")
+    }
+  }
+
+  private fun promoteToForeground() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
         startForeground(
             NOTIFICATION_ID_ONGOING,
             ongoingNotification.getNotification(),
-            FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            FOREGROUND_SERVICE_TYPE_LOCATION,
         )
       } catch (e: ForegroundServiceStartNotAllowedException) {
         Timber.e(
@@ -430,7 +445,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       startForeground(
           NOTIFICATION_ID_ONGOING,
           ongoingNotification.getNotification(),
-          FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+          FOREGROUND_SERVICE_TYPE_LOCATION,
       )
     } else {
       startForeground(NOTIFICATION_ID_ONGOING, ongoingNotification.getNotification())

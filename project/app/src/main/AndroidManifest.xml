@@ -43,12 +43,9 @@
 
     <!-- API v28 requires this for foreground services -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- The background service runs as a "connectedDevice" foreground service (upstream's choice: a
-         "location" one may not be started before the location permission exists, e.g. at boot).
-         Android 14+ only allows that type when the app also holds one of a few permissions;
-         CHANGE_NETWORK_STATE is the harmless one. Removing it crashes the app at start. -->
-    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- The tracking service is a "location" foreground service (started only once a location
+         permission exists). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
         android:name=".App"
@@ -108,7 +105,7 @@
             android:name=".services.BackgroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="location" />
 
         <receiver
             android:name=".support.receiver.StartBackgroundServiceReceiver"
