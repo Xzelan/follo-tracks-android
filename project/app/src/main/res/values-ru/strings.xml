@@ -15,7 +15,7 @@
     <string name="accept">"Сохранить"</string>
     <string name="addWaypoint">"Добавить место"</string>
     <string name="aLocation">"место"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationPermissionRequestDialogText">"Если вы хотите, чтобы OwnTracks обрабатывал данные о местоположении даже в фоне, необходимо дополнительное разрешение, позволяющее OwnTracks получать данные о местоположении \"в любом режиме\"."</string>
     <string name="backgroundLocationPermissionRequestDialogTitle">"Разрешение на фоновое определение"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Ваша версия Android ограничивает возможность определения местоположения при автоматическом запуске приложения до его открытия. Нажмите на это уведомление, чтобы открыть OwnTracks и начать отслеживание местоположения."</string>

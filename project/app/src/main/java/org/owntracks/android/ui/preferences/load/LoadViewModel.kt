@@ -199,7 +199,7 @@ constructor(
           total.append(content)
         }
         setConfiguration(total.toString())
-      } else if ("owntracks" == uri.scheme && "/config" == uri.path) {
+      } else if ("follotracks" == uri.scheme && "/config" == uri.path) {
         Timber.v("Importing config using owntracks: scheme")
 
         val queryParams =

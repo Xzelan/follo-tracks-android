@@ -13,7 +13,7 @@
     <string name="accept">"Toestaan"</string>
     <string name="addWaypoint">"Voeg routepunt toe"</string>
     <string name="aLocation">"een locatie"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationPermissionRequestDialogText">"Als u wilt dat OwnTracks ook locatiedata verzamelt terwijl het op de achtergrond draait, dan is een extra machtiging vereist om OwnTracks toe te staan om \"altijd\" locatie-informatie te ontvangen."</string>
     <string name="backgroundLocationPermissionRequestDialogTitle">"Machtiging voor achtergrondlocatie"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Deze versie van Android beperkt de ontvangst van locaties door OwnTracks wanneer deze op de achtergrond wordt gestart, totdat de app wordt geopend. Klik op deze melding om de app te openen en het registreren van locaties te starten."</string>

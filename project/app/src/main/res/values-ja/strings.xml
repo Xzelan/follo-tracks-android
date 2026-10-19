@@ -12,7 +12,7 @@
     <string name="accept">"適用"</string>
     <string name="addWaypoint">"ウェイポイントを追加する"</string>
     <string name="aLocation">"リージョン"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"このバージョンのAndroidは、バックグラウンドで起動されたときに、アプリが開かれるまで位置情報の取得が制限されます。そのため、トラッキングを開始するには、通知をタップしてアプリを開いてください。"</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"位置トラッキングが一時停止されました"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"バッテリー最適化の設定"</string>

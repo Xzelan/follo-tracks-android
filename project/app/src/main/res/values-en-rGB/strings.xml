@@ -13,7 +13,7 @@
     <string name="accept">"Accept"</string>
     <string name="addWaypoint">"Add waypoint"</string>
     <string name="aLocation">"a region"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationPermissionRequestDialogText">"If you'd like OwnTracks to collect location data even when it's running in the background, an additional permission is needed to allow OwnTracks to receive locations \"all the time\"."</string>
     <string name="backgroundLocationPermissionRequestDialogTitle">"Background Location Permission"</string>
     <string name="backgroundLocationRestrictionNotificationText">"This version of Android restricts OwnTracks from receiving locations when started in the background until the app is opened. Click this notification to open the app and start tracking location."</string>

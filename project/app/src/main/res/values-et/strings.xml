@@ -11,7 +11,7 @@
     <string name="accept">"Nõustu"</string>
     <string name="addWaypoint">"Lisa teekonnapunkt"</string>
     <string name="aLocation">"piirkond"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationPermissionRequestDialogTitle">"Õigused asukoha tuvastamiseks taustal"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Akukasutuse optimeerimise seadistused"</string>
     <string name="batteryOptimizationWhitelistDialogMessage">"Kui keelad OwnTracksi puhul akukasutuse optimeerimise, siis see võib aidata parandada asukoha täpsemat tuvastamist ning säilitada pidevat ühendust serveriga."</string>

@@ -13,7 +13,7 @@
     <string name="accept">"Acceptér"</string>
     <string name="addWaypoint">"Tilføj rutepunkt"</string>
     <string name="aLocation">"en region"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Denne version af Android blokerer OwnTracks fra at modtage positioner i baggrunden før app'en er blevet åbnet. Tryk på denne notifikation for at åbne app'en og starte sporing af position."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"Positionssporing pauseret"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Batterioptimering indstillinger"</string>

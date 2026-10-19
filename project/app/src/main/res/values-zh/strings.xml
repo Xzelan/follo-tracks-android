@@ -12,7 +12,7 @@
     <string name="accept">"接受"</string>
     <string name="addWaypoint">"添加航点"</string>
     <string name="aLocation">"一个区域"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"此版本的 Android 限制 OwnTracks 在后台启动时接收位置信息，直到应用被打开。点击此通知打开应用并开始追踪位置。"</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"位置追踪已暂停"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"电池优化设置"</string>

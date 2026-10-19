@@ -13,7 +13,7 @@
     <string name="accept">"Acceptar"</string>
     <string name="addWaypoint">"Afegir punt de pas"</string>
     <string name="aLocation">"a regió"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationPermissionRequestDialogText">"Si voleu que OwnTracks recopili dades d'ubicació fins i tot quan s'executa en segon pla, necessiteu un permís addicional per permetre que OwnTracks rebi ubicacions \"tot el temps\"."</string>
     <string name="backgroundLocationPermissionRequestDialogTitle">"Permís d'ubicació en segon pla"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Aquesta versió d'Android impedeix a OwnTracks rebre ubicacions quan s'inicia en segon pla fins que s'obre l'aplicació. Feu clic a aquesta notificació per obrir l'aplicació i començar a fer el seguiment de la ubicació."</string>

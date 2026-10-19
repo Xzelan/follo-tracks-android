@@ -14,7 +14,7 @@
     <string name="accept">"Přijmout"</string>
     <string name="addWaypoint">"Přidat bod na trase"</string>
     <string name="aLocation">"oblast"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Tato verze Androidu omezuje OwnTracks zjišťovat polohu při spuštění na pozadí, dokud není aplikace otevřena. Kliknutím na toto oznámení otevřete aplikaci a zahájíte sledování polohy."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"Sledování polohy pozastaveno"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Nastavení optimalizace baterie"</string>

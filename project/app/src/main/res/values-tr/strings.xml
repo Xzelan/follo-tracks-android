@@ -13,7 +13,7 @@
     <string name="accept">"Kabul et"</string>
     <string name="addWaypoint">"Add waypoint"</string>
     <string name="aLocation">"bölge"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"This version of Android restricts OwnTracks from receiving locations when started in the background until the app is opened. Click this notification to open the app and start tracking location."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"Location Tracking Paused"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Battery optimization settings"</string>

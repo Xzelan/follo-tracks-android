@@ -13,7 +13,7 @@
     <string name="accept">"Übernehmen"</string>
     <string name="addWaypoint">"Ort hinzufügen"</string>
     <string name="aLocation">"einen Bereich"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Diese Version von Android limitiert OwnTracks Standortzugriff im Hintergrund, bis die App geöffnet wird. Antippen dieser Benachrichtigung öffnet die App und fängt an den Standort aufzuzeichnen."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"Standortverfolgung pausiert"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Akkuoptimierungseinstellungen"</string>

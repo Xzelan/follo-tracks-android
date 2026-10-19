@@ -12,7 +12,7 @@
     <string name="accept">"Terima"</string>
     <string name="addWaypoint">"Tambahkan titik jalan"</string>
     <string name="aLocation">"sebuah wilayah"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"Versi Android ini membatasi OwnTracks untuk menerima lokasi ketika dimulai di latar belakang hingga aplikasi dibuka. Klik pemberitahuan ini untuk membuka aplikasi dan mulai melacak lokasi."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"Pelacakan Lokasi Dihentikan"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"Pengaturan"</string>

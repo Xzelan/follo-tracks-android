@@ -14,7 +14,7 @@
     <string name="aLocation">"지역"</string>
 
     <!-- Fuzzy -->
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"이 Android 버전은 앱이 열릴 때까지 백그라운드에서 실행될 때 OwnTracks가 위치를 수신하지 못하도록 제한합니다. 앱을 열고 위치 추적을 시작하려면 이 알림을 클릭하세요."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"위치 추적이 일시중지되었습니다"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"배터리 최적화 설정"</string>

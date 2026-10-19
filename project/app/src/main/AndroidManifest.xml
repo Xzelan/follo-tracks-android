@@ -151,7 +151,7 @@
                 <data
                     android:host=""
                     android:path="/config"
-                    android:scheme="owntracks"
+                    android:scheme="follotracks"
                     tools:ignore="AppLinkUrlError" />
             </intent-filter>
             <intent-filter tools:ignore="AppLinkUrlError,GoogleAppIndexingWarning">

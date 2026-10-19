@@ -20,7 +20,7 @@ val googleMapsAPIKey =
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "2.6.0"
+val versionNameValue = "0.1.0"
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
@@ -46,7 +46,7 @@ android {
   namespace = "org.owntracks.android"
 
   defaultConfig {
-    applicationId = "org.owntracks.android"
+    applicationId = "au.org.follo.tracks"
     minSdk = 24
     targetSdk = 36
 
@@ -118,7 +118,6 @@ android {
           ),
       )
       resValue("string", "GOOGLE_MAPS_API_KEY", googleMapsAPIKey)
-      applicationIdSuffix = ".debug"
       enableUnitTestCoverage = true
       enableAndroidTestCoverage = true
     }
@@ -213,7 +212,6 @@ android {
         gmsImplementation(libs.play.services.location)
       }
     }
-    create("oss") { dimension = "locationProvider" }
   }
 }
 

@@ -15,7 +15,7 @@
     <string name="accept">"קבל"</string>
     <string name="addWaypoint">"הוסף נקודת ציון"</string>
     <string name="aLocation">"איזור"</string>
-    <string name="app_name">"OwnTracks"</string>
+    <string name="app_name">"FOLLO Tracks"</string>
     <string name="backgroundLocationRestrictionNotificationText">"גרסה זו של אנדרואיד מגבילה את OwnTracks מלקבל מיקומים בעת הפעלתו ברקע עד לפתיחת האפליקציה. לחץ על הודעה זו כדי לפתוח את האפליקציה ולהתחיל לעקוב אחר מיקום."</string>
     <string name="backgroundLocationRestrictionNotificationTitle">"מעקב אחר מיקום מושהה"</string>
     <string name="batteryOptimizationWhitelistDialogButtonLabel">"הגדרות אופטימיזציה של הסוללה"</string>
