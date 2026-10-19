@@ -212,7 +212,6 @@ class MainActivity :
     setUpMap()
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener {
-      myLocationOverlay?.enableFollowLocation()
       viewModel.currentLocation.value?.let { map.controller.animateTo(it.toGeoPoint()) }
     }
 
@@ -259,8 +258,8 @@ class MainActivity :
                   viewModel.setupCompleted,
                   viewModel.endpointState,
                   viewModel.queueLength,
-              ) { _, _, _, _, _ ->
-                Unit
+              ) { _, _, _, endpoint, _ ->
+                trackSendFailures(endpoint.state)
               }
               .collect { render() }
         }
@@ -272,7 +271,12 @@ class MainActivity :
           }
         }
         // The phone decides green/grey at the area edge itself, so every new fix may change it.
-        launch { viewModel.currentLocation.collect { render() } }
+        launch {
+          viewModel.currentLocation.collect {
+            it?.let(::keepInView)
+            render()
+          }
+        }
         launch { viewModel.lastPublished.collect { render() } }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
@@ -562,15 +566,30 @@ class MainActivity :
     }
   }
 
+  /** When sends started failing (0 = the last attempt went through); retries in between don't reset it. */
+  private var failingSince = 0L
+
+  private fun trackSendFailures(state: org.owntracks.android.data.EndpointState) {
+    when (state) {
+      org.owntracks.android.data.EndpointState.ERROR,
+      org.owntracks.android.data.EndpointState.DISCONNECTED ->
+          if (failingSince == 0L) failingSince = System.currentTimeMillis()
+      org.owntracks.android.data.EndpointState.IDLE,
+      org.owntracks.android.data.EndpointState.CONNECTED -> failingSince = 0L
+      else -> {} // CONNECTING: an attempt in progress, keep what we had
+    }
+  }
+
   /**
    * Positions really held back for want of signal. Every post sits in the queue for a moment while it
-   * is sent (every 5 s in Move), so a non-empty queue alone would flash "No signal" on each send; it
-   * only counts once nothing has gone through for [NO_SIGNAL_AFTER_MS].
+   * is sent (every 5 s in Move), and the phone may simply have had no fix for a while, so a non-empty
+   * queue alone would flash "No signal"; it counts only once sends have been failing for
+   * [NO_SIGNAL_AFTER_MS].
    */
   private fun backlog(): Int {
     val queued = viewModel.queueLength.value
-    val last = viewModel.lastSentAt.value
-    return if (queued > 0 && System.currentTimeMillis() - last > NO_SIGNAL_AFTER_MS) queued else 0
+    val failing = failingSince != 0L && System.currentTimeMillis() - failingSince > NO_SIGNAL_AFTER_MS
+    return if (queued > 0 && failing) queued else 0
   }
 
   private fun render() {
@@ -666,7 +685,6 @@ class MainActivity :
           ResourcesCompat.getDrawable(resources, R.drawable.location_dot_arrow, null)?.toBitmap(px, px)?.let { setDirectionIcon(it) }
           setPersonAnchor(0.5f, 0.5f)
           setDirectionAnchor(0.5f, 0.5f)
-          enableFollowLocation()
         }
     map.overlays.add(myLocationOverlay)
     map.overlays.add(ScaleBarOverlay(map).apply { setAlignBottom(true); setScaleBarOffset(40, 260) })
@@ -674,6 +692,32 @@ class MainActivity :
   }
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
+
+  private var centredOnce = false
+
+  /**
+   * The map stays still and the dot moves over it; it only re-centres when the dot nears the edge.
+   * Following every fix (osmdroid's follow mode) slid the whole map with each few metres of GPS
+   * wobble, which is distracting while navigating (Alex, 19 Oct).
+   */
+  private fun keepInView(l: Location) {
+    if (!::map.isInitialized || map.width == 0) return
+    val p = l.toGeoPoint()
+    if (!centredOnce) {
+      map.controller.setCenter(p)
+      centredOnce = true
+      return
+    }
+    val bb = map.boundingBox
+    val dLat = (bb.latNorth - bb.latSouth) * EDGE_FRACTION
+    val dLon = (bb.lonEast - bb.lonWest) * EDGE_FRACTION
+    val nearEdge =
+        p.latitude > bb.latNorth - 1.5 * dLat || // the banner covers the top of the map
+            p.latitude < bb.latSouth + 1.5 * dLat || // and the card the bottom
+            p.longitude > bb.lonEast - dLon ||
+            p.longitude < bb.lonWest + dLon
+    if (nearEdge) map.controller.animateTo(p)
+  }
 
   /**
    * Markers (radius 0) draw as a pin with its label. Fence regions (radius > 0) are not drawn: they
@@ -802,7 +846,9 @@ class MainActivity :
   companion object {
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
-    private const val NO_SIGNAL_AFTER_MS = 30_000L
+    private const val NO_SIGNAL_AFTER_MS = 10_000L
+    /** How close (fraction of the visible map) the dot may get to an edge before the map re-centres. */
+    private const val EDGE_FRACTION = 0.15
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */
