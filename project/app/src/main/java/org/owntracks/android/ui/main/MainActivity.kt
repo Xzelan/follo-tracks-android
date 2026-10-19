@@ -98,6 +98,8 @@ class MainActivity :
   private var state: Banner? = null
   /** True while a system permission prompt is up; the banner then says "Setting up" instead of red. */
   private var promptInFlight = false
+  /** The app's own explanation dialog, if one is up (it does not pause the activity). */
+  private var ownDialog: androidx.appcompat.app.AlertDialog? = null
 
   /** What the banner is showing; [kind] decides what the one button does. */
   private data class Banner(
@@ -160,6 +162,7 @@ class MainActivity :
           },
           {
             preferences.userDeclinedEnableBackgroundLocationPermissions = true
+            runPermissionChain()
             render()
           },
       )
@@ -303,7 +306,8 @@ class MainActivity :
 
   override fun onResume() {
     super.onResume()
-    promptInFlight = false // a system prompt pauses us; being resumed means it has gone
+    // A system prompt pauses us, so being resumed means it has gone; our own dialogs do not pause us.
+    promptInFlight = ownDialog?.isShowing == true
     map.onResume()
     if (requirementsChecker.hasLocationPermissions()) {
       viewModel.requestLocationUpdates()
@@ -361,15 +365,7 @@ class MainActivity :
 
   /** Asks, in order and one at a time, for what tracking needs; the banner shows what is left. */
   private fun runPermissionChain() {
-    if (
-        !notificationPermissionRequester.hasPermission() &&
-            !preferences.userDeclinedEnableNotificationPermissions
-    ) {
-      promptInFlight = true
-      render()
-      notificationPermissionRequester.requestNotificationPermission()
-      return
-    }
+    if (promptInFlight) return // one Android prompt at a time; a second launch cancels the first
     if (!requirementsChecker.hasLocationPermissions()) {
       if (!preferences.userDeclinedEnableLocationPermissions) requestLocation()
       return
@@ -382,14 +378,40 @@ class MainActivity :
       requestBackgroundLocation()
       return
     }
+    if (
+        !notificationPermissionRequester.hasPermission() &&
+            !preferences.userDeclinedEnableNotificationPermissions
+    ) {
+      promptInFlight = true
+      render()
+      notificationPermissionRequester.requestNotificationPermission()
+      return
+    }
   }
 
+  /**
+   * Google Play's "prominent disclosure": in the app, immediately before the location request, say
+   * what is collected, why, and that it continues when the app is closed. Declining is remembered
+   * like a declined permission; the red banner's button asks again.
+   */
   private fun requestLocation() {
     promptInFlight = true
     render()
-    locationPermissionRequester.requestLocationPermissions(0, this) {
-      shouldShowRequestPermissionRationale(it)
-    }
+    MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.follo_disclosure_title)
+        .setMessage(R.string.follo_disclosure_msg)
+        .setCancelable(false)
+        .setPositiveButton(R.string.follo_disclosure_continue) { _, _ ->
+          // The disclosure is the rationale, so Android's prompt follows it directly.
+          locationPermissionRequester.requestLocationPermissions(0, this) { false }
+        }
+        .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
+          promptInFlight = false
+          preferences.userDeclinedEnableLocationPermissions = true
+          render()
+        }
+        .show()
+        .also { ownDialog = it }
   }
 
   private fun requestBackgroundLocation() {
@@ -399,19 +421,22 @@ class MainActivity :
       openAppSettings()
       return
     }
+    promptInFlight = true
+    render()
     MaterialAlertDialogBuilder(this)
         .setTitle(R.string.follo_bg_rationale_title)
         .setMessage(R.string.follo_bg_rationale_msg)
         .setPositiveButton(android.R.string.ok) { _, _ ->
-          promptInFlight = true
-          render()
           backgroundLocationPermissionRequester.requestLocationPermissions(this) { false }
         }
         .setNegativeButton(android.R.string.cancel) { _, _ ->
+          promptInFlight = false
           preferences.userDeclinedEnableBackgroundLocationPermissions = true
+          runPermissionChain()
           render()
         }
         .show()
+        .also { ownDialog = it }
   }
 
   private fun openAppSettings() {

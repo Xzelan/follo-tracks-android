@@ -53,6 +53,10 @@
     <string name="follo_setup_bad">This isn\'t a FOLLO Tracks setup link.</string>
     <string name="follo_setup_done">Set up. Sharing starts by itself in search hours.</string>
 
+    <string name="follo_disclosure_title">FOLLO Tracks uses your location</string>
+    <string name="follo_disclosure_msg">FOLLO Tracks collects your phone\'s location, battery level and speed and sends them to Find Our Lost Loved Ones so search coordinators can see which ground has been covered and where searchers are.\n\nThis continues even when the app is closed or not in use, but FOLLO only keeps positions during declared search hours, inside the search area.\n\nNext, Android asks for location access.</string>
+    <string name="follo_disclosure_continue">Continue</string>
+    <string name="follo_disclosure_not_now">Not now</string>
     <string name="follo_bg_rationale_title">Allow location all the time</string>
     <string name="follo_bg_rationale_msg">Android will ask next. Choose \"Allow all the time\" so tracking keeps going while the phone is in your pocket. FOLLO only keeps positions during search hours, inside the search area.</string>
     <string name="follo_loc_rationale_title">Location permission</string>

@@ -26,7 +26,6 @@ import org.owntracks.android.model.messages.MessageStatus
 import org.owntracks.android.model.messages.MessageTransition
 import org.owntracks.android.model.messages.MessageWaypoint
 import org.owntracks.android.model.messages.MessageWaypoints
-import org.owntracks.android.model.messages.addWifi
 import org.owntracks.android.net.WifiInfoProvider
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.types.MonitoringMode
@@ -245,7 +244,7 @@ constructor(
     val message =
         if (preferences.extendedData) {
               fromLocation(location, Build.VERSION.SDK_INT).apply {
-                addWifi(wifiInfoProvider)
+                // FOLLO: the Wi-Fi network name and router ID are not sent (the server never used them).
                 battery = deviceMetricsProvider.batteryLevel
                 batteryStatus = deviceMetricsProvider.batteryStatus
                 conn = deviceMetricsProvider.connectionType.value
