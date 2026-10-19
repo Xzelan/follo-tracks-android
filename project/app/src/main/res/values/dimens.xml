@@ -16,4 +16,7 @@
          (clipChildren/clipToPadding alone do not rescue it). This padding is subtracted back off
          the wrapper margins in MapActivity so the FAB's on-screen position is unchanged. -->
     <dimen name="fab_shadow_room">12dp</dimen>
+    <!-- FOLLO landscape: status column on the left, map on the right -->
+    <dimen name="follo_side_panel">320dp</dimen>
+    <dimen name="follo_side_card">288dp</dimen>
 </resources>

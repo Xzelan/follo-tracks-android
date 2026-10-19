@@ -211,6 +211,7 @@ class MainActivity :
       windowInsets
     }
 
+    applyOrientation(resources.configuration.orientation)
     setUpMap()
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
@@ -297,6 +298,31 @@ class MainActivity :
     handleIntent(intent)
   }
 
+  // The activity keeps running through a rotation (configChanges), so the map and its state survive;
+  // the layout is switched here instead: portrait = banner across the top, card along the bottom;
+  // landscape (phone in a holder sideways) = status and card in a column on the left, map on the right.
+  override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+    super.onConfigurationChanged(newConfig)
+    applyOrientation(newConfig.orientation)
+    // Let the camera place the dot afresh for the new shape of the visible map.
+    centredOnce = false
+    camRef = null
+    if (camera == Camera.NAV) map.post { setNavLook(true) }
+  }
+
+  private fun applyOrientation(orientation: Int) {
+    val land = orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    binding.banner.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
+      height = if (land) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+    }
+    binding.card.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
+      gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
+    }
+    binding.title.textSize = if (land) 22f else 26f
+  }
+
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     handleIntent(intent)
@@ -353,8 +379,10 @@ class MainActivity :
             upBearing = 0f
             camAnim?.cancel()
             map.mapOrientation = 0f
+            setNavLook(false)
           }
           intent.getStringExtra("follo_zoom")?.toDoubleOrNull()?.let { map.controller.setZoom(it) }
+          if (camera == Camera.NAV) setNavLook(true)
         }
     val uri = intent?.data ?: return
     if (intent.action != Intent.ACTION_VIEW) return
@@ -717,7 +745,8 @@ class MainActivity :
           setDirectionAnchor(0.5f, 0.5f)
         }
     map.overlays.add(myLocationOverlay)
-    map.overlays.add(ScaleBarOverlay(map).apply { setAlignBottom(true); setScaleBarOffset(40, 260) })
+    scaleBar = ScaleBarOverlay(map).apply { setAlignBottom(true); setScaleBarOffset(40, 260) }
+    map.overlays.add(scaleBar)
     map.overlays.add(CopyrightOverlay(this).apply { setAlignBottom(true) })
   }
 
@@ -730,6 +759,7 @@ class MainActivity :
     PAGE, // north up: map still until the dot nears an edge, then one glide putting it at the back
     HEADING, // travel direction up, dot 3/4 down, map rotates smoothly with every turn
     HEADING_CALM, // as HEADING, but the map only turns once the direction has changed by 30 degrees
+    NAV, // like Google Maps after Start: tilted map, arrow 80 % down, arrow and map glide, map turns
   }
 
   private var camera = Camera.LEASH
@@ -764,27 +794,95 @@ class MainActivity :
       Camera.LOOKAHEAD -> glide(centreFor(l, lookAheadOffset()), 0f, ms)
       Camera.PAGE -> {
         val pt = map.projection.toPixels(l.toGeoPoint(), null)
-        val top = (binding.banner.bottom - map.top).toFloat()
-        val bottom = (binding.card.top - map.top).toFloat()
-        val mx = map.width * EDGE_FRACTION
-        val my = (bottom - top) * EDGE_FRACTION
-        val near = ref == null || pt.x < mx || pt.x > map.width - mx || pt.y < top + my || pt.y > bottom - my
+        val v = visible()
+        val mx = v.width() * EDGE_FRACTION
+        val my = v.height() * EDGE_FRACTION
+        val near = ref == null || pt.x < v.left + mx || pt.x > v.right - mx || pt.y < v.top + my || pt.y > v.bottom - my
         if (near) glide(centreFor(l, lookAheadOffset(1.4f)), 0f, if (ref == null) 0L else 1200L)
       }
-      Camera.HEADING, Camera.HEADING_CALM -> {
+      Camera.HEADING, Camera.HEADING_CALM, Camera.NAV -> {
         if (hasBearing) {
           val turn = abs(((bearing - upBearing + 540f) % 360f) - 180f)
-          if (camera == Camera.HEADING || turn >= CALM_TURN_DEG) upBearing = bearing
+          if (camera != Camera.HEADING_CALM || turn >= CALM_TURN_DEG) upBearing = bearing
         }
-        // Dot 3/4 down the visible map with upBearing at the top: the centre lies ahead along it.
-        val top = (binding.banner.bottom - map.top).toFloat()
-        val bottom = (binding.card.top - map.top).toFloat()
-        val aheadPx = top + 0.75f * (bottom - top) - map.height / 2f
-        val metres = aheadPx / map.projection.metersToPixels(1f)
-        val centre = l.toGeoPoint().destinationPoint(metres.toDouble(), upBearing.toDouble())
-        glide(centre, -upBearing, if (ref == null) 0L else maxOf(ms, if (camera == Camera.HEADING_CALM) 1500L else 0L))
+        val down = if (camera == Camera.NAV) NAV_DOWN else HEADING_DOWN
+        val centre = headingUpCentre(l.toGeoPoint(), down)
+        val glideMs = if (ref == null) 0L else maxOf(ms, if (camera == Camera.HEADING_CALM) 1500L else 0L)
+        glide(centre, -upBearing, glideMs, arrowTo = if (camera == Camera.NAV) l.toGeoPoint() else null)
       }
     }
+  }
+
+  /**
+   * Map centre for a heading-up map with the fix at [down] of the way down the visible map (and in
+   * its middle sideways): the centre lies ahead of the fix along [upBearing], and to one side of it
+   * when the visible map is off-centre (landscape, where the status column is on the left).
+   */
+  private fun headingUpCentre(p: GeoPoint, down: Float): GeoPoint {
+    val v = visible()
+    val ox = v.centerX() - map.width / 2f // dot right of the view centre by ox
+    val oy = v.top + down * v.height() - map.height / 2f // dot below the view centre by oy
+    val pxPerM = map.projection.metersToPixels(1f)
+    return p.destinationPoint((oy / pxPerM).toDouble(), upBearing.toDouble())
+        .destinationPoint((ox / pxPerM).toDouble(), (upBearing - 90f).toDouble())
+  }
+
+  /** The part of the map not covered by the status banner and the card, in map-view pixels. */
+  private fun visible(): android.graphics.RectF {
+    val sideways = binding.banner.width < map.width * 0.8f // landscape: status column on the left
+    return if (sideways)
+        android.graphics.RectF((binding.banner.right - map.left).toFloat(), 0f, map.width.toFloat(), map.height.toFloat())
+    else {
+      val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
+      val bottom = (binding.card.top - map.top).toFloat().takeIf { it > top } ?: map.height.toFloat()
+      android.graphics.RectF(0f, top, map.width.toFloat(), bottom)
+    }
+  }
+
+  // ── Navigation look (Camera.NAV): tilted map + arrow, for the comparison recordings ─────────
+  private var navArrow: Marker? = null
+  private var scaleBar: ScaleBarOverlay? = null
+  private var navZoomShift = 0.0
+
+  private fun setNavLook(on: Boolean) {
+    if (on) {
+      myLocationOverlay?.let { map.overlays.remove(it) }
+      if (navArrow == null)
+          navArrow =
+              Marker(map).apply {
+                id = "nav-arrow"
+                icon = ResourcesCompat.getDrawable(resources, R.drawable.ic_follo_nav_arrow, null)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                infoWindow = null
+              }
+      navArrow?.let { if (it !in map.overlays) map.overlays.add(it) }
+      scaleBar?.let { map.overlays.remove(it) } // a scale bar means nothing on a tilted map
+      // The tilt magnifies the map by NAV_SCALE; zoom out by as much so the ground near the arrow
+      // keeps the same scale as the other styles.
+      navZoomShift = kotlin.math.ln(NAV_SCALE.toDouble()) / kotlin.math.ln(2.0)
+      map.controller.setZoom(map.zoomLevelDouble - navZoomShift)
+      map.post {
+        // Tilt the whole map back around the arrow's spot, like a navigation app's 3D view. The
+        // arrow's row stays put; the map above it recedes, so more lies ahead.
+        val v = visible()
+        map.pivotX = v.centerX()
+        map.pivotY = v.top + NAV_DOWN * v.height()
+        map.cameraDistance = 5000f * resources.displayMetrics.density
+        map.rotationX = NAV_TILT_DEG
+        map.scaleX = NAV_SCALE
+        map.scaleY = NAV_SCALE
+      }
+    } else {
+      navArrow?.let { map.overlays.remove(it) }
+      myLocationOverlay?.let { if (it !in map.overlays) map.overlays.add(it) }
+      scaleBar?.let { if (it !in map.overlays) map.overlays.add(it) }
+      if (navZoomShift != 0.0) map.controller.setZoom(map.zoomLevelDouble + navZoomShift)
+      navZoomShift = 0.0
+      map.rotationX = 0f
+      map.scaleX = 1f
+      map.scaleY = 1f
+    }
+    map.invalidate()
   }
 
   private fun blendAngle(from: Float, to: Float, w: Float): Float {
@@ -798,9 +896,8 @@ class MainActivity :
    */
   private fun lookAheadOffset(scale: Float = 1f): Pair<Float, Float> {
     if (!hasBearing) return 0f to 0f
-    val top = (binding.banner.bottom - map.top).toFloat()
-    val bottom = (binding.card.top - map.top).toFloat()
-    val off = minOf(0.25f * (bottom - top), 0.33f * map.width) * scale
+    val v = visible()
+    val off = minOf(0.25f * v.height(), 0.33f * v.width()) * scale
     val r = Math.toRadians(bearing.toDouble())
     return (-kotlin.math.sin(r) * off).toFloat() to (kotlin.math.cos(r) * off).toFloat()
   }
@@ -814,11 +911,15 @@ class MainActivity :
     return map.projection.fromPixels((map.width / 2f + pt.x - tx).roundToInt(), (map.height / 2f + pt.y - ty).roundToInt()) as GeoPoint
   }
 
-  /** Linear glide of the centre (and optionally the rotation), so consecutive glides join up. */
-  private fun glide(to: GeoPoint, orientation: Float?, ms: Long) {
+  /**
+   * Linear glide of the centre (and optionally the rotation, and the nav arrow), so consecutive glides
+   * join up into continuous movement.
+   */
+  private fun glide(to: GeoPoint, orientation: Float?, ms: Long, arrowTo: GeoPoint? = null) {
     camAnim?.cancel()
     val from = map.mapCenter
     val fromO = map.mapOrientation
+    val arrowFrom = navArrow?.position?.takeIf { it.latitude != 0.0 } ?: arrowTo
     val dO = orientation?.let { ((it - fromO + 540f) % 360f) - 180f } ?: 0f
     camAnim =
         android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
@@ -833,6 +934,12 @@ class MainActivity :
                 )
             )
             if (orientation != null) map.mapOrientation = fromO + dO * f
+            if (arrowTo != null && arrowFrom != null)
+                navArrow?.position =
+                    GeoPoint(
+                        arrowFrom.latitude + (arrowTo.latitude - arrowFrom.latitude) * f,
+                        arrowFrom.longitude + (arrowTo.longitude - arrowFrom.longitude) * f,
+                    )
           }
           start()
         }
@@ -847,10 +954,8 @@ class MainActivity :
    * radius of the invisible circle around it, in map-view pixels.
    */
   private fun anchor(): Triple<Float, Float, Float> {
-    val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
-    val bottom = (binding.card.top - map.top).takeIf { it > top } ?: map.height
-    val visible = bottom - top
-    return Triple(map.width / 2f, (top + bottom) / 2f, LEASH_FRACTION * minOf(map.width.toFloat(), visible))
+    val v = visible()
+    return Triple(v.centerX(), v.centerY(), LEASH_FRACTION * minOf(v.width(), v.height()))
   }
 
   /**
@@ -1024,6 +1129,11 @@ class MainActivity :
     /** Movement below this (or below the fix's accuracy) is GPS wobble, not walking. */
     private const val JITTER_M = 3f
     private const val CALM_TURN_DEG = 30f
+    /** Where the dot / arrow sits, as a fraction of the way down the visible map. */
+    private const val HEADING_DOWN = 0.75f
+    private const val NAV_DOWN = 0.80f
+    private const val NAV_TILT_DEG = 40f
+    private const val NAV_SCALE = 2.2f
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */
