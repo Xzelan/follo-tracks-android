@@ -137,6 +137,14 @@ class MessageProcessorTest {
     messageProcessor = buildMessageProcessor()
   }
 
+  // Built outside the stubbing lambdas: Mockito rejects a mock created while another is being stubbed.
+  private val statusPrefs =
+      mock<android.content.SharedPreferences> {
+        on { getString(any(), anyOrNull()) } doReturn null
+        on { getLong(any(), any()) } doReturn 0L
+      }
+  private val statusContext = mock<Context> { on { getSharedPreferences(any(), any()) } doReturn statusPrefs }
+
   private fun buildMessageProcessor(contactsRepo: ContactsRepo = mock {}) =
       MessageProcessor(
           applicationContext = applicationContext,
@@ -146,7 +154,7 @@ class MessageProcessorTest {
           parser = mock<Parser> {},
           scheduler = mock<Scheduler> {},
           endpointStateRepo = EndpointStateRepo(),
-          folloStatusRepo = FolloStatusRepo(mock<Context> { on { getSharedPreferences(any(), any()) } doReturn mock<android.content.SharedPreferences> { on { getString(any(), anyOrNull()) } doReturn null; on { getLong(any(), any()) } doReturn 0L } }, Parser()),
+          folloStatusRepo = FolloStatusRepo(statusContext, Parser()),
           outgoingQueueIdlingResource =
               mock<ThresholdIdlingResourceInterface> { on { isIdleNow } doReturn true },
           importConfigurationIdlingResource = SimpleIdlingResource("import", true),
