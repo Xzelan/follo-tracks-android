@@ -1,0 +1,32 @@
+# FOLLO Tracks (Android): build the signed release bundle on demand or for a version tag.
+# Secrets: FOLLO_KEYSTORE_B64 (base64 of the upload .jks), FOLLO_KEYSTORE_PASS.
+name: Release bundle
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Restore the upload key
+        run: echo "${{ secrets.FOLLO_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+      - name: Build
+        working-directory: project
+        env:
+          FOLLO_KEYSTORE: ${{ runner.temp }}/upload.jks
+          FOLLO_KEYSTORE_PASS: ${{ secrets.FOLLO_KEYSTORE_PASS }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew --no-daemon :app:bundleGmsRelease :app:assembleGmsRelease :app:testGmsDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: follo-tracks-release
+          path: |
+            project/app/build/outputs/bundle/gmsRelease/*.aab
+            project/app/build/outputs/apk/gms/release/*.apk
