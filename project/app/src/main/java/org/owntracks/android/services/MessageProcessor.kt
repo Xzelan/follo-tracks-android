@@ -417,6 +417,9 @@ constructor(
                       ?: run {
                         Timber.d("Message sent successfully: $message")
                         lastMessageStatus = LastMessageStatus.Success
+                        if (message is MessageLocation) {
+                          folloStatusRepo.lastSentAt.value = System.currentTimeMillis()
+                        }
                         if (message !is MessageWaypoint) {
                           messageReceivedIdlingResource.add(message)
                         }

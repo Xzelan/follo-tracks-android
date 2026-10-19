@@ -87,6 +87,8 @@ constructor(
 
   /** Last status element from the server; null until the phone has posted once. */
   val folloStatus: StateFlow<FolloStatusRepo.Status?> = folloStatusRepo.status
+  /** When the server last accepted a position from this phone (0 = never). */
+  val lastSentAt: StateFlow<Long> = folloStatusRepo.lastSentAt
   val setupCompleted = MutableStateFlow(preferences.setupCompleted)
 
   val lastPublished: StateFlow<Location?> = locationRepo.currentPublishedLocation

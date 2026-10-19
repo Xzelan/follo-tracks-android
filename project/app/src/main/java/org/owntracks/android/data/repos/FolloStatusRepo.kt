@@ -11,4 +11,7 @@ class FolloStatusRepo @Inject constructor() {
   data class Status(val message: MessageFollo, val receivedAt: Long)
 
   val status = MutableStateFlow<Status?>(null)
+
+  /** Epoch ms of the last location the server actually accepted (0 = none yet). */
+  val lastSentAt = MutableStateFlow(0L)
 }

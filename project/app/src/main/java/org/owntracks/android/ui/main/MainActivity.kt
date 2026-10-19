@@ -254,7 +254,7 @@ class MainActivity :
               }
               .collect { render() }
         }
-        launch { viewModel.lastPublished.collect { render() } }
+        launch { viewModel.lastSentAt.collect { render() } }
         launch { viewModel.folloStatus.collect { render() } }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
@@ -519,17 +519,17 @@ class MainActivity :
           else -> getString(R.string.follo_tracker, tid)
         }
     val parts = mutableListOf<String>()
-    val last = viewModel.lastPublished.value
+    val last = viewModel.lastSentAt.value
     parts +=
         when {
-          last == null -> getString(R.string.follo_last_none)
-          System.currentTimeMillis() - last.time < DateUtils.MINUTE_IN_MILLIS ->
+          last == 0L -> getString(R.string.follo_last_none)
+          System.currentTimeMillis() - last < DateUtils.MINUTE_IN_MILLIS ->
               getString(R.string.follo_last_sent_just_now)
           else ->
               getString(
                   R.string.follo_last_sent,
                   DateUtils.getRelativeTimeSpanString(
-                      last.time,
+                      last,
                       System.currentTimeMillis(),
                       DateUtils.MINUTE_IN_MILLIS,
                   ),
