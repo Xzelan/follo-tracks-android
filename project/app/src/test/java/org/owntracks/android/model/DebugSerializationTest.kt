@@ -9,7 +9,7 @@ class DebugSerializationTest {
   @OptIn(ExperimentalEncodingApi::class)
   @Test
   fun `debug waypoints round-trip`() {
-    val parser = Parser(null)
+    val parser = Parser()
     val b64 =
         "eyJfdHlwZSI6IndheXBvaW50cyIsIndheXBvaW50cyI6W3siX3R5cGUiOiJ3YXlwb2ludCIsImRlc2MiOiJUZXN0IFdheXBvaW50IiwibGF0Ijo1MSwibG9uIjowLCJyYWQiOjQ1MCwidHN0IjoxNTk4NDUxMzcyfV19"
     val json = String(Base64.decode(b64.toByteArray()))

@@ -24,7 +24,6 @@ import org.mockito.kotlin.verify
 import org.owntracks.android.data.EndpointState
 import org.owntracks.android.data.EndpointStatus
 import org.owntracks.android.data.repos.EndpointStateRepo
-import org.owntracks.android.model.EncryptionProvider
 import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageCard
 import org.owntracks.android.model.messages.MessageCmd
@@ -40,8 +39,6 @@ class HttpMessageProcessorEndpointTest {
   @Mock private lateinit var testPreferences: Preferences
 
   @Mock private lateinit var messageProcessor: MessageProcessor
-
-  @Mock private lateinit var encryptionProvider: EncryptionProvider
 
   @Mock private lateinit var application: Application
 
@@ -65,7 +62,6 @@ class HttpMessageProcessorEndpointTest {
       on { pubQosLocations } doReturn MqttQos.Zero
       on { pubRetainLocations } doReturn false
     }
-    encryptionProvider = mock { on { isPayloadEncryptionEnabled } doReturn false }
     messageProcessor = mock {}
     messageLocation = MessageLocation()
     messageLocation.accuracy = 10
@@ -77,7 +73,7 @@ class HttpMessageProcessorEndpointTest {
     messageLocation.timestamp = 123456789
     messageLocation.velocity = 5.6.toInt()
     messageLocation.verticalAccuracy = 1.7.toInt()
-    parser = Parser(encryptionProvider)
+    parser = Parser()
     application = mock {}
   }
 

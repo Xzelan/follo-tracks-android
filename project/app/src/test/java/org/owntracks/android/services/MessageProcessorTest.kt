@@ -35,6 +35,7 @@ import org.mockito.kotlin.verify
 import org.owntracks.android.data.repos.AsyncDeQueue
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
+import org.owntracks.android.data.repos.FolloStatusRepo
 import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageBase
 import org.owntracks.android.model.messages.MessageLocation
@@ -144,6 +145,7 @@ class MessageProcessorTest {
           parser = mock<Parser> {},
           scheduler = mock<Scheduler> {},
           endpointStateRepo = EndpointStateRepo(),
+          folloStatusRepo = FolloStatusRepo(),
           outgoingQueueIdlingResource =
               mock<ThresholdIdlingResourceInterface> { on { isIdleNow } doReturn true },
           importConfigurationIdlingResource = SimpleIdlingResource("import", true),
@@ -152,7 +154,6 @@ class MessageProcessorTest {
           locationProcessorLazy = mock<Lazy<LocationProcessor>> {},
           ioDispatcher = testDispatcher,
           scope = testScope,
-          mqttConnectionIdlingResource = SimpleIdlingResource("mqtt", true),
           outgoingQueue = queue,
       )
 
