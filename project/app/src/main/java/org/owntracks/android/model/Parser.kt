@@ -20,6 +20,7 @@ import org.owntracks.android.model.messages.MessageClear
 import org.owntracks.android.model.messages.MessageCmd
 import org.owntracks.android.model.messages.MessageConfiguration
 import org.owntracks.android.model.messages.MessageEncrypted
+import org.owntracks.android.model.messages.MessageFollo
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageLocationDeserializer
 import org.owntracks.android.model.messages.MessageLwt
@@ -43,6 +44,7 @@ class Parser @Inject constructor(private val encryptionProvider: EncryptionProvi
       subclass(MessageCmd::class)
       subclass(MessageConfiguration::class, MessageConfiguration.MessageConfigurationSerializer)
       subclass(MessageEncrypted::class)
+      subclass(MessageFollo::class)
       subclass(MessageLocation::class, MessageLocationDeserializer)
       subclass(MessageLwt::class)
       subclass(MessageStatus::class)

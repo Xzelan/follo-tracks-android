@@ -31,6 +31,7 @@ import org.owntracks.android.data.EndpointState
 import org.owntracks.android.data.repos.AsyncDeQueue
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
+import org.owntracks.android.data.repos.FolloStatusRepo
 import org.owntracks.android.data.waypoints.WaypointsRepo
 import org.owntracks.android.di.ApplicationScope
 import org.owntracks.android.di.CoroutineScopes.IoDispatcher
@@ -40,6 +41,7 @@ import org.owntracks.android.model.messages.MessageBase
 import org.owntracks.android.model.messages.MessageCard
 import org.owntracks.android.model.messages.MessageClear
 import org.owntracks.android.model.messages.MessageCmd
+import org.owntracks.android.model.messages.MessageFollo
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageTransition
 import org.owntracks.android.model.messages.MessageUnknown
@@ -70,6 +72,7 @@ constructor(
     private val parser: Parser,
     private val scheduler: Scheduler,
     private val endpointStateRepo: EndpointStateRepo,
+    private val folloStatusRepo: FolloStatusRepo,
     @param:Named("outgoingQueueIdlingResource")
     private val outgoingQueueIdlingResource: ThresholdIdlingResourceInterface,
     @param:Named("importConfigurationIdlingResource")
@@ -559,6 +562,9 @@ constructor(
       is MessageTransition -> {
         processIncomingMessage(message)
       }
+      is MessageFollo -> {
+        processIncomingMessage(message)
+      }
       is MessageUnknown -> {
         Timber.w("Unknown message type received")
         messageReceivedIdlingResource.remove(message)
@@ -592,6 +598,21 @@ constructor(
   private fun processInOrder(handler: suspend () -> Unit) {
     incomingMessageConsumer.start()
     incomingMessageHandlers.trySend(handler)
+  }
+
+  /** FOLLO status from the server: remembered for the banner; name and map tiles applied. */
+  private fun processIncomingMessage(message: MessageFollo) {
+    processInOrder {
+      Timber.d("Received FOLLO status $message")
+      folloStatusRepo.status.value = FolloStatusRepo.Status(message, System.currentTimeMillis())
+      message.name?.takeIf { it.isNotBlank() && it != preferences.displayName }?.let {
+        preferences.displayName = it
+      }
+      message.tile?.takeIf { it.isNotBlank() && it != preferences.mapTileUrl }?.let {
+        preferences.mapTileUrl = it
+      }
+      messageReceivedIdlingResource.remove(message)
+    }
   }
 
   private fun processIncomingMessage(message: MessageClear) {

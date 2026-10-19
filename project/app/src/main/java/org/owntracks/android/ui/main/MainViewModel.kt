@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
+import org.owntracks.android.data.repos.FolloStatusRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
@@ -48,6 +49,7 @@ constructor(
     private val waypointsRepo: WaypointsRepo,
     locationRepo: LocationRepo,
     endpointStateRepo: EndpointStateRepo,
+    folloStatusRepo: FolloStatusRepo,
     private val deviceMetricsProvider: DeviceMetricsProvider,
     private val parser: Parser,
     @param:CoroutineScopes.IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -76,6 +78,11 @@ constructor(
   }
 
   val monitoring = MutableStateFlow(preferences.monitoring)
+  val tileUrlState = MutableStateFlow(preferences.mapTileUrl)
+  val displayNameState = MutableStateFlow(preferences.displayName)
+
+  /** Last status element from the server; null until the phone has posted once. */
+  val folloStatus: StateFlow<FolloStatusRepo.Status?> = folloStatusRepo.status
   val setupCompleted = MutableStateFlow(preferences.setupCompleted)
 
   val lastPublished: StateFlow<Location?> = locationRepo.currentPublishedLocation
@@ -108,6 +115,9 @@ constructor(
           if (Preferences::monitoring.name in properties) monitoring.value = preferences.monitoring
           if (Preferences::setupCompleted.name in properties)
               setupCompleted.value = preferences.setupCompleted
+          if (Preferences::mapTileUrl.name in properties) tileUrlState.value = preferences.mapTileUrl
+          if (Preferences::displayName.name in properties)
+              displayNameState.value = preferences.displayName
         }
       }
 

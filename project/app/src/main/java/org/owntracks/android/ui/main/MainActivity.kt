@@ -255,6 +255,16 @@ class MainActivity :
               .collect { render() }
         }
         launch { viewModel.lastPublished.collect { render() } }
+        launch { viewModel.folloStatus.collect { render() } }
+        launch { viewModel.displayNameState.collect { render() } }
+        launch {
+          viewModel.tileUrlState.collect {
+            if (::map.isInitialized) {
+              map.setTileSource(FolloTileSource(it))
+              map.invalidate()
+            }
+          }
+        }
       }
     }
 
@@ -439,17 +449,49 @@ class MainActivity :
         return Banner(Kind.NEED_NOTIFICATIONS, red, s(R.string.follo_action_title), s(R.string.follo_notif_sub), s(R.string.follo_notif_btn))
     if (!isIgnoringBatteryOptimizations())
         return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title), s(R.string.follo_battery_sub), s(R.string.follo_battery_btn))
+    val server =
+        viewModel.folloStatus.value
+            ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }
+            ?.message
     if (viewModel.isMoving) {
       val queued = viewModel.queueLength.value
       val sub =
           when {
             queued == 1 -> s(R.string.follo_offline_sub_one)
             queued > 1 -> getString(R.string.follo_offline_sub, queued)
+            !server?.line.isNullOrBlank() -> server!!.line!!
+            server?.search != null && server.until != null ->
+                getString(R.string.follo_until, server.search, server.until)
+            server?.search != null -> server.search!!
             else -> s(R.string.follo_sharing_sub)
           }
       return Banner(Kind.SHARING, green, s(R.string.follo_sharing_title), sub)
     }
-    return Banner(Kind.STANDBY, grey, s(R.string.follo_standby_title), s(R.string.follo_standby_sub))
+    return when (server?.state) {
+      "outside" ->
+          Banner(
+              Kind.STANDBY,
+              grey,
+              s(R.string.follo_standby_outside_title),
+              server.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub),
+          )
+      "nosearch" ->
+          Banner(
+              Kind.STANDBY,
+              grey,
+              s(R.string.follo_standby_nosearch_title),
+              server.line?.takeIf { it.isNotBlank() }
+                  ?: ((server.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
+                      s(R.string.follo_nosearch_tail)),
+          )
+      else ->
+          Banner(
+              Kind.STANDBY,
+              grey,
+              s(R.string.follo_standby_title),
+              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub),
+          )
+    }
   }
 
   private fun render() {
@@ -645,5 +687,7 @@ class MainActivity :
     private const val REGION_PREFIX = "region-"
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
+    /** A Significant-mode phone may not post for hours; keep the last server word that long. */
+    private const val SERVER_STATUS_TTL_MS = 12 * 60 * 60 * 1000L
   }
 }

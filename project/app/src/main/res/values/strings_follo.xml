@@ -13,6 +13,12 @@
 
     <string name="follo_standby_title">Standing by</string>
     <string name="follo_standby_sub">Sharing starts by itself in search hours, inside the search area</string>
+    <string name="follo_standby_outside_title">Standing by: outside the search area</string>
+    <string name="follo_standby_outside_sub">Sharing starts by itself when you enter the area</string>
+    <string name="follo_standby_nosearch_title">Standing by: no search right now</string>
+    <string name="follo_next_search">Next search: %1$s. </string>
+    <string name="follo_nosearch_tail">FOLLO doesn\'t keep check-ins outside search hours</string>
+    <string name="follo_until">%1$s, until %2$s</string>
 
     <string name="follo_action_title">Action needed</string>
     <string name="follo_perm_location_sub">FOLLO Tracks needs your location to record where you search</string>
