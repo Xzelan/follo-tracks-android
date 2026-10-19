@@ -39,4 +39,16 @@ class MessageFolloTest {
     assertEquals("Fri 6 Nov, 7:00 am", back.next)
     assertEquals("Alex", back.name)
   }
+
+  @Test
+  fun `area box and window end are parsed`() {
+    val reply =
+        """[{"_type":"follo","state":"outside","box":"-26.631421,153.027650,-26.622437,153.037699","ends":1792421940}]"""
+    val follo = parser.fromJson(reply.byteInputStream()).filterIsInstance<MessageFollo>().single()
+    val b = follo.boxBounds()!!
+    assertEquals(-26.631421, b[0], 1e-9)
+    assertEquals(153.037699, b[3], 1e-9)
+    assertEquals(1792421940L, follo.ends)
+    assertEquals(null, MessageFollo().apply { box = "1,2,3" }.boxBounds())
+  }
 }

@@ -265,7 +265,15 @@ class MainActivity :
               .collect { render() }
         }
         launch { viewModel.lastSentAt.collect { render() } }
-        launch { viewModel.folloStatus.collect { render() } }
+        launch {
+          viewModel.folloStatus.collect {
+            drawAreaBox(it?.message)
+            render()
+          }
+        }
+        // The phone decides green/grey at the area edge itself, so every new fix may change it.
+        launch { viewModel.currentLocation.collect { render() } }
+        launch { viewModel.lastPublished.collect { render() } }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
           viewModel.tileUrlState.collect {
@@ -499,8 +507,20 @@ class MainActivity :
         viewModel.folloStatus.value
             ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }
             ?.message
-    // The server's word wins: it knows the storage box. Without a server word yet, Move = sharing.
-    val sharing = if (server != null) server.state == "sharing" else viewModel.isMoving
+    // While a window is open the server sends its storage box, and the phone decides in/out from its
+    // own fix: that keeps working with no signal, so the edge shows the moment it is crossed. Without
+    // a box, the server's word; without any server word yet, Move = sharing.
+    val nowS = System.currentTimeMillis() / 1000
+    val windowOver = server?.ends?.let { nowS >= it } == true
+    val area = server?.boxBounds()?.takeIf { !windowOver }
+    val here = viewModel.currentLocation.value ?: viewModel.lastPublished.value
+    val sharing =
+        when {
+          server == null -> viewModel.isMoving
+          windowOver -> false
+          area != null && here != null -> insideBox(area, here.latitude, here.longitude)
+          else -> server.state == "sharing"
+        }
     if (sharing) {
       val queued = viewModel.queueLength.value
       val sub =
@@ -515,21 +535,21 @@ class MainActivity :
           }
       return Banner(Kind.SHARING, green, s(R.string.follo_sharing_title), sub)
     }
-    return when (server?.state) {
+    return when (if (area != null) "outside" else if (windowOver) null else server?.state) {
       "outside" ->
           Banner(
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_outside_title),
-              server.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub),
+              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub),
           )
       "nosearch" ->
           Banner(
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_nosearch_title),
-              server.line?.takeIf { it.isNotBlank() }
-                  ?: ((server.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
+              server?.line?.takeIf { it.isNotBlank() }
+                  ?: ((server?.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
                       s(R.string.follo_nosearch_tail)),
           )
       else ->
@@ -642,35 +662,14 @@ class MainActivity :
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
 
-  /** Fences (radius > 0) draw as a dashed circle; markers (radius 0) as a pin with its label. */
+  /**
+   * Markers (radius 0) draw as a pin with its label. Fence regions (radius > 0) are not drawn: they
+   * are the server's wake-up circle around the area, bigger than it; the real boundary is the
+   * area box ([drawAreaBox]).
+   */
   private fun addRegion(w: WaypointModel) {
     val point = GeoPoint(w.geofenceLatitude.value, w.geofenceLongitude.value)
-    if (w.geofenceRadius > 0) {
-      map.overlays.add(
-          0,
-          Polygon(map).apply {
-            id = REGION_PREFIX + w.id
-            points = Polygon.pointsAsCircle(point, w.geofenceRadius.toDouble())
-            fillPaint.color = getColor(R.color.follo_area_fill)
-            outlinePaint.color = getColor(R.color.follo_area)
-            outlinePaint.strokeWidth = resources.displayMetrics.density * 3
-            outlinePaint.pathEffect = DashPathEffect(floatArrayOf(24f, 16f), 0f)
-            infoWindow = null
-          },
-      )
-      map.overlays.add(
-          Marker(map).apply {
-            id = REGION_PREFIX + w.id + LABEL_SUFFIX
-            position = point
-            setTextIcon(getString(R.string.follo_area_label))
-            setTextLabelBackgroundColor(Color.argb(184, 0, 0, 0))
-            setTextLabelForegroundColor(Color.WHITE)
-            setTextLabelFontSize((14 * resources.displayMetrics.scaledDensity).roundToInt())
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            infoWindow = null
-          },
-      )
-    } else {
+    if (w.geofenceRadius <= 0) {
       map.overlays.add(
           Marker(map).apply {
             id = REGION_PREFIX + w.id
@@ -695,6 +694,44 @@ class MainActivity :
           )
     }
   }
+
+  /** The search area's storage box from the server: the line where sharing starts and stops. */
+  private fun drawAreaBox(status: org.owntracks.android.model.messages.MessageFollo?) {
+    if (!::map.isInitialized) return
+    map.overlays.removeAll { (it is Polygon && it.id == AREA_ID) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
+    val b = status?.boxBounds()
+    if (status != null && b != null && status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true) {
+      val (s, w, n, e) = listOf(b[0], b[1], b[2], b[3])
+      map.overlays.add(
+          0,
+          Polygon(map).apply {
+            id = AREA_ID
+            points = listOf(GeoPoint(n, w), GeoPoint(n, e), GeoPoint(s, e), GeoPoint(s, w), GeoPoint(n, w))
+            fillPaint.color = getColor(R.color.follo_area_fill)
+            outlinePaint.color = getColor(R.color.follo_area)
+            outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+            outlinePaint.pathEffect = DashPathEffect(floatArrayOf(24f, 16f), 0f)
+            infoWindow = null
+          },
+      )
+      map.overlays.add(
+          Marker(map).apply {
+            id = AREA_ID + LABEL_SUFFIX
+            position = GeoPoint(n, (w + e) / 2)
+            setTextIcon(getString(R.string.follo_area_label))
+            setTextLabelBackgroundColor(Color.argb(184, 0, 0, 0))
+            setTextLabelForegroundColor(Color.WHITE)
+            setTextLabelFontSize((14 * resources.displayMetrics.scaledDensity).roundToInt())
+            setAnchor(Marker.ANCHOR_CENTER, -0.2f) // just inside the north edge
+            infoWindow = null
+          },
+      )
+    }
+    map.invalidate()
+  }
+
+  private fun insideBox(b: DoubleArray, lat: Double, lon: Double) =
+      lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3]
 
   private fun removeRegion(w: WaypointModel) {
     val ids = setOf(REGION_PREFIX + w.id, REGION_PREFIX + w.id + LABEL_SUFFIX)
@@ -737,6 +774,7 @@ class MainActivity :
 
   companion object {
     private const val REGION_PREFIX = "region-"
+    private const val AREA_ID = "follo-area"
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */

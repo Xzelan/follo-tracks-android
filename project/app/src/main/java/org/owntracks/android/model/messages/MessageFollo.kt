@@ -33,6 +33,18 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   var name: String? = null
   /** XYZ tile URL template for the map; applied when it changes. */
   var tile: String? = null
+  /**
+   * The search area's storage box "minlat,minlon,maxlat,maxlon" while a window is open for this
+   * phone: drawn on the map, and used by the phone itself to go green/grey at the edge even when
+   * it has no signal. Null when no window is open.
+   */
+  var box: String? = null
+  /** Epoch seconds the open window closes; the phone stops trusting [box] after that. */
+  var ends: Long? = null
+
+  /** [box] as (minLat, minLon, maxLat, maxLon), or null if absent or malformed. */
+  fun boxBounds(): DoubleArray? =
+      box?.split(',')?.mapNotNull { it.trim().toDoubleOrNull() }?.takeIf { it.size == 4 }?.toDoubleArray()
 
   override fun toString(): String = "[MessageFollo state=$state]"
 

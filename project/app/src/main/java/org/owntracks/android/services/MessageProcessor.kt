@@ -2,6 +2,9 @@ package org.owntracks.android.services
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
@@ -13,7 +16,6 @@ import javax.inject.Named
 import javax.inject.Singleton
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.measureTime
 import kotlinx.coroutines.CancellationException
@@ -115,6 +117,38 @@ constructor(
     // Collect queue size changes and propagate to endpoint state repo
     scope.launch(ioDispatcher) {
       outgoingQueue.queueSize.collect { size -> endpointStateRepo.setQueueLength(size) }
+    }
+    watchNetwork()
+  }
+
+  /**
+   * FOLLO: send the backlog the moment a working connection appears (walking back into coverage,
+   * a hotspot joining) instead of sitting out the rest of a backoff wait.
+   */
+  private fun watchNetwork() {
+    val cm =
+        applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return
+    try {
+      cm.registerDefaultNetworkCallback(
+          object : ConnectivityManager.NetworkCallback() {
+            private var validated: Network? = null
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+              if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+              if (validated == network) return
+              validated = network
+              Timber.d("Network $network is up, retrying the queue now")
+              notifyOutgoingMessageQueue()
+            }
+
+            override fun onLost(network: Network) {
+              if (validated == network) validated = null
+            }
+          }
+      )
+    } catch (e: Exception) {
+      Timber.w(e, "Could not watch the network")
     }
   }
 
@@ -751,6 +785,6 @@ constructor(
   companion object {
     private val SEND_FAILURE_NOT_READY_WAIT = 10.seconds
     private val SEND_FAILURE_BACKOFF_INITIAL_WAIT = 1.seconds
-    private val SEND_FAILURE_BACKOFF_MAX_WAIT = 2.minutes
+    private val SEND_FAILURE_BACKOFF_MAX_WAIT = 30.seconds // FOLLO: was 2 min; a retry is one small request
   }
 }
