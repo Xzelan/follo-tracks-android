@@ -18,7 +18,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageBase
-import org.owntracks.android.model.messages.MessageEncrypted
 import org.owntracks.android.model.messages.MessageUnknown
 import timber.log.Timber
 
@@ -118,7 +117,6 @@ class RoomBackedMessageQueue(
       // Import messages into Room database
       var migratedCount = 0
       messagesToMigrate
-          .filter { it !is MessageEncrypted }
           .forEach { message ->
             try {
               enqueueInternal(message)

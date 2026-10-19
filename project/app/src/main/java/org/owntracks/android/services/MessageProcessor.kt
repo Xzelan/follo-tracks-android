@@ -48,7 +48,6 @@ import org.owntracks.android.model.messages.MessageUnknown
 import org.owntracks.android.model.messages.MessageWaypoint
 import org.owntracks.android.net.MessageProcessorEndpoint
 import org.owntracks.android.net.http.HttpMessageProcessorEndpoint
-import org.owntracks.android.net.mqtt.MQTTMessageProcessorEndpoint
 import org.owntracks.android.preferences.DefaultsProvider.Companion.DEFAULT_SUB_TOPIC
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
@@ -83,8 +82,6 @@ constructor(
     private val locationProcessorLazy: Lazy<LocationProcessor>,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @param:ApplicationScope private val scope: CoroutineScope,
-    @param:Named("mqttConnectionIdlingResource")
-    private val mqttConnectionIdlingResource: SimpleIdlingResource,
     private val outgoingQueue: AsyncDeQueue,
 ) : Preferences.OnPreferenceChangeListener {
   private var messageProcessorEndpoint: MessageProcessorEndpoint? = null
@@ -206,9 +203,6 @@ constructor(
               loadOutgoingMessageProcessor()
               Result.success(Unit)
             }
-            is MQTTMessageProcessorEndpoint -> {
-              (messageProcessorEndpoint as MQTTMessageProcessorEndpoint).reconnect()
-            }
             else -> {
               Result.success(Unit)
             }
@@ -294,35 +288,18 @@ constructor(
     dequeueAndSenderJob = scope.launch(ioDispatcher) { sendAvailableMessages() }
   }
 
-  private fun getEndpoint(mode: ConnectionMode): MessageProcessorEndpoint {
-    Timber.v("Creating endpoint for mode: $mode")
-    return when (mode) {
-      ConnectionMode.MQTT ->
-          MQTTMessageProcessorEndpoint(
-              this,
-              endpointStateRepo,
-              scheduler,
-              preferences,
-              parser,
-              caKeyStore,
-              scope,
-              ioDispatcher,
-              applicationContext,
-              mqttConnectionIdlingResource,
-          )
-      ConnectionMode.HTTP ->
-          HttpMessageProcessorEndpoint(
-              this,
-              parser,
-              preferences,
-              applicationContext,
-              endpointStateRepo,
-              caKeyStore,
-              scope,
-              ioDispatcher,
-          )
-    }
-  }
+  // FOLLO: HTTP is the only transport (MQTT and payload encryption were removed from this build).
+  private fun getEndpoint(@Suppress("UNUSED_PARAMETER") mode: ConnectionMode): MessageProcessorEndpoint =
+      HttpMessageProcessorEndpoint(
+          this,
+          parser,
+          preferences,
+          applicationContext,
+          endpointStateRepo,
+          caKeyStore,
+          scope,
+          ioDispatcher,
+      )
 
   fun queueMessageForSending(message: MessageBase) {
     outgoingQueueIdlingResource.increment()
@@ -407,15 +384,12 @@ constructor(
                       }
 
                       is MessageProcessorEndpoint.OutgoingMessageSendingException,
-                      is ConfigurationIncompleteException,
-                      is MQTTMessageProcessorEndpoint.NotConnectedException -> {
+                      is ConfigurationIncompleteException -> {
                         when (this) {
                           is MessageProcessorEndpoint.OutgoingMessageSendingException ->
                               Timber.w(this, "Error sending message $message. Re-queueing")
                           is ConfigurationIncompleteException ->
                               Timber.e("Configuration incomplete for message $message. Re-queueing")
-                          is MQTTMessageProcessorEndpoint.NotConnectedException ->
-                              Timber.w("MQTT not connected for message $message. Re-queueing")
                         }
                         reQueueMessage(message)
                         resendDelayWait(retryWait)

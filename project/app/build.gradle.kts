@@ -236,7 +236,6 @@ dependencies {
   implementation(libs.osmdroid)
 
   // Connectivity
-  implementation(libs.paho.mqttclient)
   implementation(libs.okhttp)
 
   // Utility libraries
@@ -248,9 +247,6 @@ dependencies {
   implementation(libs.kotlin.datetime)
   implementation(libs.kotlinx.serialization.json)
 
-  // Used directly for its lightweight XSalsa20/Poly1305 primitives (EncryptionProvider); not
-  // registered as a JCA Security provider, so only those specific classes end up in the app.
-  implementation(libs.bouncycastle)
 
   // Widget libraries
   implementation(libs.widgets.materialize) { artifact { type = "aar" } }
@@ -274,7 +270,6 @@ dependencies {
 
   androidTestImplementation(libs.barista) { exclude("org.jetbrains.kotlin") }
   androidTestImplementation(libs.okhttp.mockwebserver)
-  androidTestImplementation(libs.bundles.kmqtt)
   androidTestImplementation(libs.square.leakcanary)
 
   androidTestUtil(libs.bundles.androidx.test.util)

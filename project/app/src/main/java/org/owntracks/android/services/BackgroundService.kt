@@ -243,8 +243,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           endpointStateRepo.endpointState.collect {
             ongoingNotification.setEndpointState(
                 it,
-                if (preferences.mode == ConnectionMode.MQTT) preferences.host
-                else preferences.url.toHttpUrlOrNull()?.host ?: "",
+                preferences.url.toHttpUrlOrNull()?.host ?: "",
             )
           }
         }

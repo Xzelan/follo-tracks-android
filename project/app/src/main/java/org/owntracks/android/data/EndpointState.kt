@@ -10,9 +10,7 @@ import java.security.cert.CertPathValidatorException
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLProtocolException
-import org.eclipse.paho.client.mqttv3.MqttException
 import org.owntracks.android.R
-import org.owntracks.android.net.mqtt.MqttConnectionConfiguration
 import org.owntracks.android.support.interfaces.ConfigurationIncompleteException
 import timber.log.Timber
 
@@ -62,9 +60,6 @@ data class EndpointStatus(
         // Configuration validator has failed
         is ConfigurationIncompleteException -> {
           when (e.cause) {
-            // MQTT Host wasn't provided
-            is MqttConnectionConfiguration.MissingHostException ->
-                context.getString(R.string.statusEndpointStateMessageMissingHost)
             // URL isn't a URL
             is IllegalArgumentException ->
                 context.getString(R.string.statusEndpointStateMessageMalformedHostPort)
@@ -82,87 +77,21 @@ data class EndpointStatus(
             } else {
               context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
             }
-        is MqttException ->
-            when (val mqttExceptionCause = e.cause) {
-              // DNS fail
-              is UnknownHostException ->
-                  context.getString(R.string.statusEndpointStateMessageUnknownHost)
-              // Timeout
-              is SocketTimeoutException ->
-                  context.getString(R.string.statusEndpointStateMessageSocketTimeout)
-              is ConnectException ->
-                  if (mqttExceptionCause.message?.contains("ECONNREFUSED") == true) {
-                    context.getString(R.string.statusEndpointStateMessageConnectionRefused)
-                  } else {
-                    context.getString(R.string.statusEndpointStateMessageUnableToConnect)
-                  }
-              //  TLS on a plain-text endpoint shows up like this
-              is SSLHandshakeException -> {
-                if (mqttExceptionCause.cause?.cause is CertPathValidatorException) {
-                  context.getString(R.string.statusEndpointStateMessageTLSEndpointCANotTrustedError)
-                } else if (
-                    mqttExceptionCause.message != null &&
-                        mqttExceptionCause.message!!.contains("connection closed")
-                ) {
-                  context.getString(R.string.statusEndpointStateMessageTLSConnectionClosed)
-                } else {
-                  context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
-                }
-              }
-              // Client cert errors show up like this
-              is SSLProtocolException ->
-                  if (
-                      mqttExceptionCause.message != null &&
-                          mqttExceptionCause.message!!.contains("TLSV1_ALERT_CERTIFICATE_REQUIRED")
-                  ) {
-                    context.getString(
-                        R.string.statusEndpointStateMessageTLSEndpointClientCertsRequired
-                    )
-                  } else {
-                    context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
-                  }
-              is SSLException -> {
-                context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
-              }
-              // Usually non-TLS against a TLS (or non MQTT) endpoint
-              is EOFException -> context.getString(R.string.statusEndpointStateMessageEOFError)
-              is IOException ->
-                  if (mqttExceptionCause.message?.startsWith("WebSocket Response header") == true) {
-                    context.getString(
-                        R.string.statusEndpointStateMessageEndpointDoesNotSupportWebsockets
-                    )
-                  } else {
-                    mqttExceptionCause.message ?: mqttExceptionCause.toString()
-                  }
-              // General MQTT broker error cases
-              else ->
-                  when (e.reasonCode.toShort()) {
-                    MqttException.REASON_CODE_INVALID_PROTOCOL_VERSION ->
-                        context.getString(R.string.statusEndpointStateMessageInvalidProtocolVersion)
-                    MqttException.REASON_CODE_INVALID_CLIENT_ID ->
-                        context.getString(R.string.statusEndpointStateMessageInvalidClientId)
-                    MqttException.REASON_CODE_FAILED_AUTHENTICATION ->
-                        context.getString(R.string.statusEndpointStateMessageAuthenticationFailed)
-                    MqttException.REASON_CODE_NOT_AUTHORIZED ->
-                        context.getString(R.string.statusEndpointStateMessageNotAuthorized)
-                    MqttException.REASON_CODE_SUBSCRIBE_FAILED ->
-                        context.getString(R.string.statusEndpointStateMessageSubscribeFailed)
-                    MqttException.REASON_CODE_CLIENT_TIMEOUT ->
-                        context.getString(R.string.statusEndpointStateMessageClientTimeout)
-                    MqttException.REASON_CODE_WRITE_TIMEOUT ->
-                        context.getString(R.string.statusEndpointStateMessageServerTimeout)
-                    MqttException.REASON_CODE_SERVER_CONNECT_ERROR ->
-                        context.getString(R.string.statusEndpointStateMessageUnableToConnect)
-                    MqttException.REASON_CODE_SSL_CONFIG_ERROR ->
-                        context.getString(R.string.statusEndpointStateMessageTLSConfigError)
-                    MqttException.REASON_CODE_CONNECTION_LOST ->
-                        context.getString(
-                            R.string.statusEndpointStateMessageConnectionLost,
-                            mqttExceptionCause.toString(),
-                        )
-                    else -> mqttExceptionCause.toString()
-                  }
+        is SSLHandshakeException ->
+            if (e.cause?.cause is CertPathValidatorException) {
+              context.getString(R.string.statusEndpointStateMessageTLSEndpointCANotTrustedError)
+            } else {
+              context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
             }
+        is SSLException -> context.getString(R.string.statusEndpointStateMessageTLSError, e.message)
+        is EOFException -> context.getString(R.string.statusEndpointStateMessageEOFError)
+        is ConnectException ->
+            if (e.message?.contains("ECONNREFUSED") == true) {
+              context.getString(R.string.statusEndpointStateMessageConnectionRefused)
+            } else {
+              context.getString(R.string.statusEndpointStateMessageUnableToConnect)
+            }
+        is IOException -> e.message ?: e.toString()
         else -> e.toString()
       }.also { Timber.v(error, "Rendering error as $it") }
 
