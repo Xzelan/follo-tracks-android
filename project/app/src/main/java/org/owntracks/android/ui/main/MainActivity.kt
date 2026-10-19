@@ -38,6 +38,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.combine
@@ -272,7 +273,7 @@ class MainActivity :
         // The phone decides green/grey at the area edge itself, so every new fix may change it.
         launch {
           viewModel.currentLocation.collect {
-            it?.let(::keepInView)
+            it?.let(::followCamera)
             render()
           }
         }
@@ -341,6 +342,20 @@ class MainActivity :
   // ── Setup link ─────────────────────────────────────────────────────────────────────────
 
   private fun handleIntent(intent: Intent?) {
+    // Debug builds only: pick the map-following style for the side-by-side recordings (19 Oct).
+    if (org.owntracks.android.BuildConfig.DEBUG)
+        intent?.getStringExtra("follo_camera")?.let { name ->
+          Camera.entries.firstOrNull { it.name.equals(name, true) }?.let {
+            camera = it
+            centredOnce = false
+            camRef = null
+            hasBearing = false
+            upBearing = 0f
+            camAnim?.cancel()
+            map.mapOrientation = 0f
+          }
+          intent.getStringExtra("follo_zoom")?.toDoubleOrNull()?.let { map.controller.setZoom(it) }
+        }
     val uri = intent?.data ?: return
     if (intent.action != Intent.ACTION_VIEW) return
     intent.data = null
@@ -708,6 +723,121 @@ class MainActivity :
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
 
+  /** Ways the map can follow the dot; [Camera.LEASH] is the app's. The rest exist for comparison. */
+  private enum class Camera {
+    LEASH, // north up: invisible circle, map still until the dot reaches it, then glides
+    LOOKAHEAD, // north up: dot kept a quarter-screen behind the middle along the travel direction
+    PAGE, // north up: map still until the dot nears an edge, then one glide putting it at the back
+    HEADING, // travel direction up, dot 3/4 down, map rotates smoothly with every turn
+    HEADING_CALM, // as HEADING, but the map only turns once the direction has changed by 30 degrees
+  }
+
+  private var camera = Camera.LEASH
+  /** The last fix the camera accepted as real movement (GPS wobble while standing is ignored). */
+  private var camRef: Location? = null
+  private var camRefAt = 0L
+  private var bearing = 0f
+  private var hasBearing = false
+  /** The direction shown at the top of the screen in the heading-up styles. */
+  private var upBearing = 0f
+  private var camAnim: android.animation.ValueAnimator? = null
+
+  private fun followCamera(l: Location) {
+    if (!::map.isInitialized || map.width == 0 || map.height == 0 || followPaused) return
+    // Standing still: the dot may wobble by a few metres, the map must not. Only movement beyond the
+    // fix's own accuracy (at least JITTER_M) moves the camera or changes the travel direction.
+    val ref = camRef
+    val now = System.currentTimeMillis()
+    if (ref != null) {
+      val gate = maxOf(JITTER_M, minOf(l.accuracy, 15f))
+      if (ref.distanceTo(l) < gate) return
+      val b = ref.bearingTo(l)
+      bearing = if (hasBearing) blendAngle(bearing, b, 0.5f) else b
+      hasBearing = true
+    }
+    // Glide over the time it took to get here, so the map moves continuously, not in hops.
+    val ms = if (ref == null) 0L else (now - camRefAt).coerceIn(500L, 3000L)
+    camRef = l
+    camRefAt = now
+    when (camera) {
+      Camera.LEASH -> keepInView(l)
+      Camera.LOOKAHEAD -> glide(centreFor(l, lookAheadOffset()), 0f, ms)
+      Camera.PAGE -> {
+        val pt = map.projection.toPixels(l.toGeoPoint(), null)
+        val top = (binding.banner.bottom - map.top).toFloat()
+        val bottom = (binding.card.top - map.top).toFloat()
+        val mx = map.width * EDGE_FRACTION
+        val my = (bottom - top) * EDGE_FRACTION
+        val near = ref == null || pt.x < mx || pt.x > map.width - mx || pt.y < top + my || pt.y > bottom - my
+        if (near) glide(centreFor(l, lookAheadOffset(1.4f)), 0f, if (ref == null) 0L else 1200L)
+      }
+      Camera.HEADING, Camera.HEADING_CALM -> {
+        if (hasBearing) {
+          val turn = abs(((bearing - upBearing + 540f) % 360f) - 180f)
+          if (camera == Camera.HEADING || turn >= CALM_TURN_DEG) upBearing = bearing
+        }
+        // Dot 3/4 down the visible map with upBearing at the top: the centre lies ahead along it.
+        val top = (binding.banner.bottom - map.top).toFloat()
+        val bottom = (binding.card.top - map.top).toFloat()
+        val aheadPx = top + 0.75f * (bottom - top) - map.height / 2f
+        val metres = aheadPx / map.projection.metersToPixels(1f)
+        val centre = l.toGeoPoint().destinationPoint(metres.toDouble(), upBearing.toDouble())
+        glide(centre, -upBearing, if (ref == null) 0L else maxOf(ms, if (camera == Camera.HEADING_CALM) 1500L else 0L))
+      }
+    }
+  }
+
+  private fun blendAngle(from: Float, to: Float, w: Float): Float {
+    val d = ((to - from + 540f) % 360f) - 180f
+    return (from + d * w + 360f) % 360f
+  }
+
+  /**
+   * Screen offset (px, from the visible middle) that puts the dot behind the middle along the travel
+   * direction, north up: heading north = 3/4 of the way down.
+   */
+  private fun lookAheadOffset(scale: Float = 1f): Pair<Float, Float> {
+    if (!hasBearing) return 0f to 0f
+    val top = (binding.banner.bottom - map.top).toFloat()
+    val bottom = (binding.card.top - map.top).toFloat()
+    val off = minOf(0.25f * (bottom - top), 0.33f * map.width) * scale
+    val r = Math.toRadians(bearing.toDouble())
+    return (-kotlin.math.sin(r) * off).toFloat() to (kotlin.math.cos(r) * off).toFloat()
+  }
+
+  /** The map centre (north up) that puts this fix at the visible middle plus [offset]. */
+  private fun centreFor(l: Location, offset: Pair<Float, Float> = 0f to 0f): GeoPoint {
+    val pt = map.projection.toPixels(l.toGeoPoint(), null)
+    val (ax, ay, _) = anchor()
+    val tx = ax + offset.first
+    val ty = ay + offset.second
+    return map.projection.fromPixels((map.width / 2f + pt.x - tx).roundToInt(), (map.height / 2f + pt.y - ty).roundToInt()) as GeoPoint
+  }
+
+  /** Linear glide of the centre (and optionally the rotation), so consecutive glides join up. */
+  private fun glide(to: GeoPoint, orientation: Float?, ms: Long) {
+    camAnim?.cancel()
+    val from = map.mapCenter
+    val fromO = map.mapOrientation
+    val dO = orientation?.let { ((it - fromO + 540f) % 360f) - 180f } ?: 0f
+    camAnim =
+        android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+          duration = ms
+          interpolator = android.view.animation.LinearInterpolator()
+          addUpdateListener { a ->
+            val f = a.animatedValue as Float
+            map.controller.setCenter(
+                GeoPoint(
+                    from.latitude + (to.latitude - from.latitude) * f,
+                    from.longitude + (to.longitude - from.longitude) * f,
+                )
+            )
+            if (orientation != null) map.mapOrientation = fromO + dO * f
+          }
+          start()
+        }
+  }
+
   private var centredOnce = false
   /** True once the volunteer drags the map themselves; tapping the card brings following back. */
   private var followPaused = false
@@ -890,6 +1020,10 @@ class MainActivity :
     private const val LEASH_FRACTION = 0.25f
     /** How long one glide takes; about the time between fixes, so the map moves continuously. */
     private const val PAN_MS = 900L
+    private const val EDGE_FRACTION = 0.15f
+    /** Movement below this (or below the fix's accuracy) is GPS wobble, not walking. */
+    private const val JITTER_M = 3f
+    private const val CALM_TURN_DEG = 30f
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */
