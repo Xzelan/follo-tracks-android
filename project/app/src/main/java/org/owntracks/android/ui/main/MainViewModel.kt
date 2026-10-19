@@ -7,6 +7,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Base64
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -148,14 +152,44 @@ constructor(
    * refused before the user is even asked. That, plus the confirm dialog, is what stands in for
    * OwnTracks' "allow external configuration" switch.
    */
-  fun parseSetupLink(uri: Uri): SetupLink {
-    val inline =
-        if (uri.scheme == "follotracks" && uri.path == "/config") uri.getQueryParameter("inline")
-        else null
-    if (inline.isNullOrBlank()) return SetupLink.Bad("not a setup link: $uri")
+  suspend fun parseSetupLink(uri: Uri): SetupLink {
+    val bytes: ByteArray =
+        when {
+          uri.scheme == "follotracks" && uri.path == "/config" -> {
+            val inline = uri.getQueryParameter("inline")
+            if (inline.isNullOrBlank()) return SetupLink.Bad("no inline configuration")
+            try {
+              Base64.getDecoder().decode(inline)
+            } catch (e: IllegalArgumentException) {
+              return SetupLink.Bad("inline configuration is not base64")
+            }
+          }
+          // The https link from Messages, handed straight to the app as a verified App Link: ask the
+          // server for the configuration it stands for. Only FOLLO hosts, only /app.
+          uri.scheme == "https" && isFolloHost(uri.host) && uri.path == "/app" -> {
+            val cfgUrl =
+                uri.buildUpon().path("/appcfg").build().toString()
+            try {
+              withContext(ioDispatcher) {
+                val client =
+                    OkHttpClient.Builder()
+                        .connectTimeout(15, TimeUnit.SECONDS)
+                        .readTimeout(15, TimeUnit.SECONDS)
+                        .build()
+                client.newCall(Request.Builder().url(cfgUrl).build()).execute().use { r ->
+                  if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
+                  r.body.bytes()
+                }
+              }
+            } catch (e: Exception) {
+              Timber.w(e, "Could not fetch the setup configuration")
+              return SetupLink.Bad("could not fetch configuration: ${e.message}")
+            }
+          }
+          else -> return SetupLink.Bad("not a setup link: $uri")
+        }
     val config =
         try {
-          val bytes = Base64.getDecoder().decode(inline)
           parser.fromJson(bytes) as? MessageConfiguration
         } catch (e: Exception) {
           Timber.w(e, "Setup link could not be decoded")
@@ -163,7 +197,7 @@ constructor(
         } ?: return SetupLink.Bad("not a configuration")
     val url = config["url"] as? String ?: return SetupLink.Bad("no url")
     val host = Uri.parse(url).host ?: return SetupLink.Bad("bad url")
-    if (Uri.parse(url).scheme != "https" || host !in FOLLO_HOSTS)
+    if (Uri.parse(url).scheme != "https" || !isFolloHost(host))
         return SetupLink.Bad("not a FOLLO server: $host")
     if ((config["mode"] as? Int) != 3) return SetupLink.Bad("not HTTP mode")
     val tid = (config["tid"] as? String).orEmpty()
@@ -189,5 +223,9 @@ constructor(
   companion object {
     /** Servers a setup link may point at. Add a host here before the server moves. */
     val FOLLO_HOSTS = setOf("follo-tracks.pages.dev", "tracks.follo.org.au")
+
+    /** The FOLLO hosts, plus the Cloudflare preview deployments of the same project. */
+    fun isFolloHost(host: String?): Boolean =
+        host != null && (host in FOLLO_HOSTS || host.endsWith(".follo-tracks.pages.dev"))
   }
 }

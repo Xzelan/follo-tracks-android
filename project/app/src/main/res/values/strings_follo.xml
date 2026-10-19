@@ -36,6 +36,7 @@
     <string name="follo_who">%1$s · tracker %2$s</string>
     <string name="follo_tracker">Tracker %1$s</string>
     <string name="follo_last_sent">Last sent %1$s</string>
+    <string name="follo_last_sent_just_now">Last sent just now</string>
     <string name="follo_last_none">Nothing sent yet</string>
     <string name="follo_battery">Battery %1$d%%</string>
     <string name="follo_waiting">%1$d waiting to send</string>

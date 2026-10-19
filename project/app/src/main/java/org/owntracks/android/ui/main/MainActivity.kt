@@ -321,12 +321,18 @@ class MainActivity :
     val uri = intent?.data ?: return
     if (intent.action != Intent.ACTION_VIEW) return
     intent.data = null
-    when (val link = viewModel.parseSetupLink(uri)) {
-      is MainViewModel.SetupLink.Bad -> {
-        Timber.w("Rejected setup link: ${link.reason}")
-        Toast.makeText(this, R.string.follo_setup_bad, Toast.LENGTH_LONG).show()
+    lifecycleScope.launch {
+      when (val link = viewModel.parseSetupLink(uri)) {
+        is MainViewModel.SetupLink.Bad -> {
+          Timber.w("Rejected setup link: ${link.reason}")
+          Toast.makeText(this@MainActivity, R.string.follo_setup_bad, Toast.LENGTH_LONG).show()
+        }
+        is MainViewModel.SetupLink.Ready -> confirmSetup(link)
       }
-      is MainViewModel.SetupLink.Ready ->
+    }
+  }
+
+  private fun confirmSetup(link: MainViewModel.SetupLink.Ready) {
           MaterialAlertDialogBuilder(this)
               .setTitle(R.string.follo_setup_title)
               .setMessage(getString(R.string.follo_setup_msg, link.host, link.tid))
@@ -341,7 +347,6 @@ class MainActivity :
               }
               .setNegativeButton(android.R.string.cancel, null)
               .show()
-    }
   }
 
   // ── Permissions ─────────────────────────────────────────────────────────────────────────
@@ -516,16 +521,20 @@ class MainActivity :
     val parts = mutableListOf<String>()
     val last = viewModel.lastPublished.value
     parts +=
-        if (last == null) getString(R.string.follo_last_none)
-        else
-            getString(
-                R.string.follo_last_sent,
-                DateUtils.getRelativeTimeSpanString(
-                    last.time,
-                    System.currentTimeMillis(),
-                    DateUtils.MINUTE_IN_MILLIS,
-                ),
-            )
+        when {
+          last == null -> getString(R.string.follo_last_none)
+          System.currentTimeMillis() - last.time < DateUtils.MINUTE_IN_MILLIS ->
+              getString(R.string.follo_last_sent_just_now)
+          else ->
+              getString(
+                  R.string.follo_last_sent,
+                  DateUtils.getRelativeTimeSpanString(
+                      last.time,
+                      System.currentTimeMillis(),
+                      DateUtils.MINUTE_IN_MILLIS,
+                  ),
+              )
+        }
     val queued = viewModel.queueLength.value
     if (queued > 0) parts += getString(R.string.follo_waiting, queued)
     viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }

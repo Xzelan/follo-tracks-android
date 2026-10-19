@@ -289,7 +289,8 @@ class HttpMessageProcessorEndpoint(
     const val HEADER_USERNAME = "X-Limit-U"
     const val HEADER_DEVICE = "X-Limit-D"
     const val HEADER_USERAGENT = "User-Agent"
-    const val USERAGENT = "Owntracks-Android/${BuildConfig.FLAVOR}/${BuildConfig.VERSION_CODE}"
+    // FOLLO-Tracks tells the FOLLO server to add its status element; "Android" keeps the Android cadence keys.
+    const val USERAGENT = "FOLLO-Tracks-Android/${BuildConfig.VERSION_CODE} Owntracks-Android/${BuildConfig.FLAVOR}/${BuildConfig.VERSION_CODE}"
     private const val HTTPTOPIC = "owntracks/http/"
   }
 }
