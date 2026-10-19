@@ -41,6 +41,9 @@
     <string name="follo_battery">Battery %1$d%%</string>
     <string name="follo_waiting">%1$d waiting to send</string>
     <string name="follo_recentre">Recentre the map on you</string>
+    <string name="follo_notif_standby">FOLLO Tracks: standing by</string>
+    <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
+    <string name="follo_area_label">Search area</string>
 
     <string name="follo_setup_title">Set up FOLLO Tracks?</string>
     <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>

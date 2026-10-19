@@ -46,9 +46,9 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
   }
   private var serviceNotificationState =
       ServiceNotificationState(
-          context.getString(R.string.app_name),
-          "",
           getMonitoringLabel(initialMode),
+          "",
+          "",
           false,
       )
 
@@ -59,7 +59,7 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
           .setStyle(NotificationCompat.BigTextStyle())
           .setSmallIcon(R.drawable.ic_owntracks_80)
           .setSound(null, AudioManager.STREAM_NOTIFICATION)
-          .setColor(context.getColor(R.color.OTPrimaryBlue))
+          .setColor(context.getColor(R.color.follo_green))
           .setCategory(NotificationCompat.CATEGORY_SERVICE)
           .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
@@ -92,37 +92,29 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
   }
 
   fun setEndpointState(endpointState: EndpointStatus, host: String) {
+    // FOLLO: a plain line only while sending is not working; otherwise nothing to read.
     val notificationContent =
         when (endpointState.state) {
-          EndpointState.CONNECTED,
-          EndpointState.IDLE ->
-              context.getString(
-                  R.string.notificationEndpointStateConnected,
-                  context.resources.getString(R.string.CONNECTED),
-                  host,
-              )
-          EndpointState.ERROR ->
-              if (endpointState.error != null)
-                  "${endpointState.getLabel(context)}: ${endpointState.getErrorLabel(context)}"
-              else endpointState.getLabel(context)
-          else -> endpointState.getLabel(context)
+          EndpointState.ERROR,
+          EndpointState.ERROR_CONFIGURATION,
+          EndpointState.DISCONNECTED -> context.getString(R.string.follo_notif_trouble)
+          else -> ""
         }
     serviceNotificationState = serviceNotificationState.copy(content = notificationContent)
     updateNotification()
   }
 
+  // FOLLO: the notification says what the banner says. Move = the server has sharing on.
   private fun getMonitoringLabel(monitoringMode: MonitoringMode) = context.run {
     when (monitoringMode) {
-      MonitoringMode.Quiet -> getString(R.string.monitoring_quiet)
-      MonitoringMode.Manual -> getString(R.string.monitoring_manual)
-      MonitoringMode.Significant -> getString(R.string.monitoring_significant)
-      MonitoringMode.Move -> getString(R.string.monitoring_move)
+      MonitoringMode.Move -> getString(R.string.follo_sharing_title)
+      else -> getString(R.string.follo_notif_standby)
     }
   }
 
   fun setMonitoringMode(monitoringMode: MonitoringMode) {
     serviceNotificationState =
-        serviceNotificationState.copy(subText = getMonitoringLabel(monitoringMode))
+        serviceNotificationState.copy(title = getMonitoringLabel(monitoringMode), subText = "")
     updateNotification()
   }
 

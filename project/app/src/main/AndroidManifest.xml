@@ -32,10 +32,6 @@
     <!-- To autostart the app once the device boots -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-
-    <!-- Not actively requested. Has to be enabled manually. Access to broker certificates in private storage on older APIs or on devices not providing files through content:// URIs -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- To locate the device -->
@@ -47,8 +43,10 @@
 
     <!-- API v28 requires this for foreground services -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
-    <!-- API v34 requires this for foreground services -->
+    <!-- The background service runs as a "connectedDevice" foreground service (upstream's choice: a
+         "location" one may not be started before the location permission exists, e.g. at boot).
+         Android 14+ only allows that type when the app also holds one of a few permissions;
+         CHANGE_NETWORK_STATE is the harmless one. Removing it crashes the app at start. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 

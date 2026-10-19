@@ -619,7 +619,7 @@ class MainActivity :
           Marker(map).apply {
             id = REGION_PREFIX + w.id + LABEL_SUFFIX
             position = point
-            setTextIcon(w.description)
+            setTextIcon(getString(R.string.follo_area_label))
             setTextLabelBackgroundColor(Color.argb(184, 0, 0, 0))
             setTextLabelForegroundColor(Color.WHITE)
             setTextLabelFontSize((14 * resources.displayMetrics.scaledDensity).roundToInt())
