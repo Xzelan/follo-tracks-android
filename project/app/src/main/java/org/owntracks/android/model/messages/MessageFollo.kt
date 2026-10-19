@@ -2,6 +2,7 @@ package org.owntracks.android.model.messages
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * FOLLO's status element, sent by the FOLLO server in the reply to a location post alongside the
