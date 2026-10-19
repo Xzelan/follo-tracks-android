@@ -47,8 +47,9 @@ class PreferencesGettersAndSetters(private val parameter: Parameter) {
         .filterIsInstance<KMutableProperty1<Preferences, Any>>()
         .first { it.name == parameter.preferenceName }
         .set(preferences, parameter.preferenceValue)
-    if (parameter.httpOnlyMode) {
-      preferences.mode = ConnectionMode.HTTP
+    // FOLLO's default mode is HTTP, so the MQTT-only cases must select MQTT explicitly.
+    if (parameter.preferenceName != Preferences::mode.name) {
+      preferences.mode = if (parameter.httpOnlyMode) ConnectionMode.HTTP else ConnectionMode.MQTT
     }
     val messageConfiguration = preferences.exportToMessage()
     assertEquals(parameter.preferenceValueExpected, messageConfiguration[parameter.preferenceName])
