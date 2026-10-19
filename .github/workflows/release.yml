@@ -14,7 +14,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest ships the Android SDK (ANDROID_HOME); Gradle fetches the platform it needs.
+      - name: Accept SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Restore the upload key
         run: echo "${{ secrets.FOLLO_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
       - name: Build
