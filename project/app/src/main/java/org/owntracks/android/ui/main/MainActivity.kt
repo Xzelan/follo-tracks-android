@@ -212,6 +212,7 @@ class MainActivity :
 
     applyOrientation(resources.configuration.orientation)
     setUpMap()
+    if (camera == Camera.NAV) setNavLook(true)
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
 
@@ -708,7 +709,7 @@ class MainActivity :
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
     map.maxZoomLevel = 20.0
-    map.controller.setZoom(16.0)
+    map.controller.setZoom(START_ZOOM) // walking scale; the NAV look zooms out to make up for its tilt
     map.controller.setCenter(GeoPoint(-41.1, 146.83)) // until the first fix arrives
 
     val provider =
@@ -751,7 +752,10 @@ class MainActivity :
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
 
-  /** Ways the map can follow the dot; [Camera.LEASH] is the app's. The rest exist for comparison. */
+  /**
+   * Ways the map can follow the dot. [Camera.NAV] is the app's (Alex chose it from the side-by-side
+   * recordings, 20 Oct 2026); the rest stay for comparison, selectable in debug builds only.
+   */
   private enum class Camera {
     LEASH, // north up: invisible circle, map still until the dot reaches it, then glides
     LOOKAHEAD, // north up: dot kept a quarter-screen behind the middle along the travel direction
@@ -761,7 +765,7 @@ class MainActivity :
     NAV, // like Google Maps after Start: tilted map, arrow 80 % down, arrow and map glide, map turns
   }
 
-  private var camera = Camera.LEASH
+  private var camera = Camera.NAV
   /** The last fix the camera accepted as real movement (GPS wobble while standing is ignored). */
   private var camRef: Location? = null
   private var camRefAt = 0L
@@ -843,7 +847,11 @@ class MainActivity :
   private var scaleBar: ScaleBarOverlay? = null
   private var navZoomShift = 0.0
 
+  private var navOn = false
+
   private fun setNavLook(on: Boolean) {
+    val wasOn = navOn
+    navOn = on
     if (on) {
       myLocationOverlay?.let { map.overlays.remove(it) }
       if (navArrow == null)
@@ -858,8 +866,10 @@ class MainActivity :
       scaleBar?.let { map.overlays.remove(it) } // a scale bar means nothing on a tilted map
       // The tilt magnifies the map by NAV_SCALE; zoom out by as much so the ground near the arrow
       // keeps the same scale as the other styles.
-      navZoomShift = kotlin.math.ln(NAV_SCALE.toDouble()) / kotlin.math.ln(2.0)
-      map.controller.setZoom(map.zoomLevelDouble - navZoomShift)
+      if (!wasOn) { // only once: a rotation re-applies the look without zooming out again
+        navZoomShift = kotlin.math.ln(NAV_SCALE.toDouble()) / kotlin.math.ln(2.0)
+        map.controller.setZoom(map.zoomLevelDouble - navZoomShift)
+      }
       map.post {
         // Tilt the whole map back around the arrow's spot, like a navigation app's 3D view. The
         // arrow's row stays put; the map above it recedes, so more lies ahead.
@@ -986,10 +996,11 @@ class MainActivity :
     followPaused = false
     val l = viewModel.currentLocation.value ?: return
     if (!::map.isInitialized || map.width == 0) return
-    val pt = map.projection.toPixels(l.toGeoPoint(), null)
-    val (ax, ay, _) = anchor()
-    val c = map.projection.fromPixels((map.width / 2f + pt.x - ax).roundToInt(), (map.height / 2f + pt.y - ay).roundToInt())
-    map.controller.animateTo(c, null, PAN_MS)
+    // Forget the last accepted fix, so the current style places the dot afresh (heading-up styles
+    // included, which a plain north-up re-centre would undo).
+    camRef = null
+    centredOnce = false
+    followCamera(l)
   }
 
   /**
@@ -1130,6 +1141,7 @@ class MainActivity :
     /** Where the dot / arrow sits, as a fraction of the way down the visible map. */
     private const val HEADING_DOWN = 0.75f
     private const val NAV_DOWN = 0.80f
+    private const val START_ZOOM = 18.5
     private const val NAV_TILT_DEG = 40f
     private const val NAV_SCALE = 2.2f
     private const val LABEL_SUFFIX = "-label"
