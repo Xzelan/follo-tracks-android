@@ -49,6 +49,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.CopyrightOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
+import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.ScaleBarOverlay
 import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
 import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
@@ -242,8 +243,8 @@ class MainActivity :
                 map.overlays.removeAll { o -> o is Marker && o.id.startsWith(CONTACT_PREFIX) }
                 map.invalidate()
               }
-              is ContactsRepoChange.ContactAdded -> updateContactMarker(it.contact)
-              is ContactsRepoChange.ContactLocationUpdated -> updateContactMarker(it.contact)
+              is ContactsRepoChange.ContactAdded -> updateContactMarker(it.contact).also { drawPair() }
+              is ContactsRepoChange.ContactLocationUpdated -> updateContactMarker(it.contact).also { drawPair() }
               is ContactsRepoChange.ContactCardUpdated -> updateContactMarker(it.contact)
               is ContactsRepoChange.ContactRemoved -> {
                 map.overlays.removeAll { o -> o is Marker && o.id == CONTACT_PREFIX + it.contact.id }
@@ -268,6 +269,7 @@ class MainActivity :
         launch {
           viewModel.folloStatus.collect {
             drawAreaBox(it?.message)
+            drawPair()
             render()
           }
         }
@@ -275,6 +277,7 @@ class MainActivity :
         launch {
           viewModel.currentLocation.collect {
             it?.let(::followCamera)
+            drawPair()
             render()
           }
         }
@@ -559,11 +562,13 @@ class MainActivity :
     val nowS = System.currentTimeMillis() / 1000
     val windowOver = server?.ends?.let { nowS >= it } == true
     val area = server?.boxBounds()?.takeIf { !windowOver }
+    val ring = server?.polyPoints()?.takeIf { !windowOver }
     val here = viewModel.currentLocation.value ?: viewModel.lastPublished.value
     val sharing =
         when {
           server == null -> viewModel.isMoving
           windowOver -> false
+          ring != null && here != null -> insidePoly(ring, here.latitude, here.longitude)
           area != null && here != null -> insideBox(area, here.latitude, here.longitude)
           else -> server.state == "sharing"
         }
@@ -581,7 +586,7 @@ class MainActivity :
           }
       return Banner(Kind.SHARING, green, s(R.string.follo_sharing_title), sub)
     }
-    return when (if (area != null) "outside" else if (windowOver) null else server?.state) {
+    return when (if (area != null || ring != null) "outside" else if (windowOver) null else server?.state) {
       "outside" ->
           Banner(
               Kind.STANDBY,
@@ -1041,18 +1046,24 @@ class MainActivity :
 
   private fun drawAreaBox(status: org.owntracks.android.model.messages.MessageFollo?) {
     if (!::map.isInitialized) return
-    val key = status?.box?.takeIf { status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true }
+    val key = (status?.poly?.toString() ?: status?.box)?.takeIf { status?.ends?.let { System.currentTimeMillis() / 1000 >= it } != true }
     if (key == drawnBox) return // the same box arrives with every reply; redrawing it each time flickers
     drawnBox = key
     map.overlays.removeAll { (it is Polygon && it.id == AREA_ID) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
     val b = status?.boxBounds()
-    if (status != null && b != null && status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true) {
-      val (s, w, n, e) = listOf(b[0], b[1], b[2], b[3])
+    val ring = status?.polyPoints()
+    if (status != null && (b != null || ring != null) && status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true) {
+      // The drawn boundary when the area has one (21 Oct 2026), else the box. Label at the top edge's middle.
+      val pts = ring?.map { (la, lo) -> GeoPoint(la, lo) }?.let { it + it.first() }
+          ?: listOf(GeoPoint(b!![2], b[1]), GeoPoint(b[2], b[3]), GeoPoint(b[0], b[3]), GeoPoint(b[0], b[1]), GeoPoint(b[2], b[1]))
+      val n = pts.maxOf { it.latitude }
+      val w = pts.minOf { it.longitude }
+      val e = pts.maxOf { it.longitude }
       map.overlays.add(
           0,
           Polygon(map).apply {
             id = AREA_ID
-            points = listOf(GeoPoint(n, w), GeoPoint(n, e), GeoPoint(s, e), GeoPoint(s, w), GeoPoint(n, w))
+            points = pts
             fillPaint.color = getColor(R.color.follo_area_fill)
             outlinePaint.color = getColor(R.color.follo_area)
             outlinePaint.strokeWidth = resources.displayMetrics.density * 4
@@ -1077,6 +1088,68 @@ class MainActivity :
 
   private fun insideBox(b: DoubleArray, lat: Double, lon: Double) =
       lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3]
+
+  /** Ray casting on (lat, lon) pairs; same rule as the server's insideFence. */
+  private fun insidePoly(ring: List<Pair<Double, Double>>, lat: Double, lon: Double): Boolean {
+    var c = false
+    var j = ring.size - 1
+    for (i in ring.indices) {
+      val (yi, xi) = ring[i]
+      val (yj, xj) = ring[j]
+      if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) c = !c
+      j = i
+    }
+    return c
+  }
+
+  /**
+   * Line-leader pair (Alex, 21 Oct 2026): a line from this phone to the other leader of its team, grey, CYAN when they
+   * are PAIR_M ± PAIR_TOL_M apart (the 20 m strip). The partner comes from the server's status ([MessageFollo.pair]);
+   * its position is the teammate location the server already sends. No partner, or no fix for either, = no line.
+   */
+  private fun drawPair() {
+    if (!::map.isInitialized) return
+    val topic = viewModel.folloStatus.value?.message?.pair?.topic
+    val me = viewModel.currentLocation.value
+    val other = topic?.let { viewModel.allContacts[it]?.latLng }
+    val line = map.overlays.firstOrNull { it is Polyline && it.id == PAIR_ID } as Polyline?
+    val label = map.overlays.firstOrNull { it is Marker && it.id == PAIR_ID + LABEL_SUFFIX } as Marker?
+    if (me == null || other == null) {
+      if (line != null || label != null) {
+        map.overlays.removeAll { (it is Polyline && it.id == PAIR_ID) || (it is Marker && it.id == PAIR_ID + LABEL_SUFFIX) }
+        map.invalidate()
+      }
+      return
+    }
+    val a = GeoPoint(me.latitude, me.longitude)
+    val b = GeoPoint(other.latitude.value, other.longitude.value)
+    val d = a.distanceToAsDouble(b)
+    val ok = kotlin.math.abs(d - PAIR_M) <= PAIR_TOL_M
+    val colour = if (ok) Color.rgb(0, 229, 255) else Color.rgb(154, 163, 160)
+    val l =
+        line
+            ?: Polyline(map).apply {
+              id = PAIR_ID
+              infoWindow = null
+              outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+            }.also { map.overlays.add(1.coerceAtMost(map.overlays.size), it) }
+    l.setPoints(listOf(a, b))
+    l.outlinePaint.color = colour
+    l.outlinePaint.strokeWidth = resources.displayMetrics.density * (if (ok) 5 else 4)
+    val m =
+        label
+            ?: Marker(map).apply {
+              id = PAIR_ID + LABEL_SUFFIX
+              infoWindow = null
+              setTextLabelForegroundColor(Color.WHITE)
+              setTextLabelFontSize((12 * resources.displayMetrics.scaledDensity).roundToInt())
+              setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            }.also { map.overlays.add(it) }
+    m.position = GeoPoint((a.latitude + b.latitude) / 2, (a.longitude + b.longitude) / 2)
+    m.setTextLabelBackgroundColor(if (ok) Color.argb(220, 0, 140, 160) else Color.argb(184, 0, 0, 0))
+    m.setTextIcon(String.format(java.util.Locale.ROOT, "%.1f m", d))
+    map.invalidate()
+  }
 
   private fun removeRegion(w: WaypointModel) {
     val ids = setOf(REGION_PREFIX + w.id, REGION_PREFIX + w.id + LABEL_SUFFIX)
@@ -1129,6 +1202,9 @@ class MainActivity :
   companion object {
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
+    private const val PAIR_ID = "follo-pair"
+    private const val PAIR_M = 20.0
+    private const val PAIR_TOL_M = 0.5
     private const val NO_SIGNAL_AFTER_MS = 10_000L
     /** Radius of the invisible circle, as a fraction of the visible map's shorter side. */
     private const val LEASH_FRACTION = 0.25f

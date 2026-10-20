@@ -41,6 +41,17 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   var box: String? = null
   /** Epoch seconds the open window closes; the phone stops trusting [box] after that. */
   var ends: Long? = null
+  /**
+   * The area's drawn boundary as [[lat, lon], …] when it has one (FOLLO server 20 Oct 2026): it replaces [box] as the
+   * line where sharing starts and stops, and is what the map draws.
+   */
+  var poly: List<List<Double>>? = null
+  /** The other line leader of this phone's team, when it has exactly two: the map draws the line between them. */
+  var pair: FolloPair? = null
+
+  /** [poly] as (lat, lon) points, or null if absent or malformed. */
+  fun polyPoints(): List<Pair<Double, Double>>? =
+      poly?.mapNotNull { p -> if (p.size >= 2) p[0] to p[1] else null }?.takeIf { it.size >= 3 }
 
   /** [box] as (minLat, minLon, maxLat, maxLon), or null if absent or malformed. */
   fun boxBounds(): DoubleArray? =
@@ -51,4 +62,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   companion object {
     const val TYPE = "follo"
   }
+}
+
+/** The pair partner: its tracker ID and its location topic (= the teammate's contact id on this phone). */
+@Serializable
+class FolloPair {
+  var tid: String? = null
+  var topic: String? = null
 }
