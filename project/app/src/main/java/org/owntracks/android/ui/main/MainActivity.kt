@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.location.Location
 import android.net.Uri
 import android.os.Build
@@ -1046,7 +1045,6 @@ class MainActivity :
             fillPaint.color = getColor(R.color.follo_area_fill)
             outlinePaint.color = getColor(R.color.follo_area)
             outlinePaint.strokeWidth = resources.displayMetrics.density * 4
-            outlinePaint.pathEffect = DashPathEffect(floatArrayOf(24f, 16f), 0f)
             infoWindow = null
           },
       )

@@ -6,8 +6,8 @@
     <color name="follo_card">#F6F7F3</color>
     <color name="follo_text">#1B1F1D</color>
     <color name="follo_subtext">#3D4440</color>
-    <color name="follo_area">#FFD84D</color>
-    <color name="follo_area_fill">#14FFD84D</color>
+    <color name="follo_area">#00FF00</color> <!-- pure green, solid (Alex 20 Oct) -->
+    <color name="follo_area_fill">#1400FF00</color>
     <color name="follo_dot">#2B7CFF</color>
     <color name="follo_white">#FFFFFF</color>
 </resources>
