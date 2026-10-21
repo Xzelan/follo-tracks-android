@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 import org.owntracks.android.di.ApplicationScope
 
 /**
- * The phone's own walking track (Alex, 21 Oct 2026), drawn as an orange line. Fed by every fix the
+ * The phone's own walking track (Alex, 21 Oct 2026), drawn magenta like QField tracklogs. Fed by every fix the
  * phone publishes (also in the background) and by the screen's own fixes. Kept 12 h and across
  * restarts; fixes worse than 30 m are skipped, a point is kept every 3 m, and the line is broken
  * after a 2 min gap or a 50 m jump. Only on the phone: nothing extra is sent. Same rules as iOS.

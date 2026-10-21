@@ -10,6 +10,6 @@
     <color name="follo_area_fill">#1400FF00</color>
     <color name="follo_dot">#2B7CFF</color>
     <color name="follo_white">#FFFFFF</color>
-    <!-- The phone's own walking track (21 Oct 2026); same orange on iOS -->
-    <color name="follo_track">#FF9800</color>
+    <!-- The phone's own walking track (21 Oct 2026); magenta like QField tracklogs (255,0,255); same on iOS -->
+    <color name="follo_track">#FF00FF</color>
 </resources>

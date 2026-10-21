@@ -1111,7 +1111,7 @@ class MainActivity :
 
   private var drawnTrack: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>? = null
 
-  /** The phone's own walking track: orange, above the area, below the pair line. */
+  /** The phone's own walking track: magenta like QField tracklogs, above the area, below the pair line. */
   private fun drawTrack(points: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>) {
     if (!::map.isInitialized || points == drawnTrack) return
     drawnTrack = points
