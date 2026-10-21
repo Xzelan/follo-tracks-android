@@ -16,13 +16,15 @@ apply<EspressoMetadataEmbeddingPlugin>()
 val gmsImplementation: Configuration by configurations.creating
 
 val versionNameValue = "0.1.7"
+// Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code was never uploaded
+val versionBuild = 1
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
   val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
   val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
   val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
-  return 400000000 + major * 10000000 + minor * 100000 + patch * 1000
+  return 400000000 + major * 10000000 + minor * 100000 + patch * 1000 + versionBuild
 }
 
 val generatedVersionCode = generateVersionCode(versionNameValue)
