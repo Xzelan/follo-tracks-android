@@ -27,6 +27,7 @@ import org.owntracks.android.di.ApplicationScope
 import org.owntracks.android.di.CoroutineScopes
 import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageBase
+import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.model.messages.MessageCard
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.net.CALeafCertMatchingHostnameVerifier
@@ -263,13 +264,16 @@ class HttpMessageProcessorEndpoint(
   }
 
   override fun onFinalizeMessage(message: MessageBase): MessageBase {
-    // Build pseudo topic based on tid
+    // FOLLO (21 Oct 2026): the server names every teammate by its topic (owntracks/<user>/phone) and the map matches
+    // contacts on that topic; upstream's pseudo topic owntracks/http/<tid> never matched, so no teammate was ever
+    // drawn, and two phones sharing a tracker ID collapsed into one. A topic in the body wins; the pseudo topic
+    // is only the fallback.
     when (message) {
       is MessageLocation -> {
-        message.topic = HTTPTOPIC + message.trackerId
+        message.topic = FolloRules.incomingTopic(message.visibleTopic, message.trackerId)
       }
       is MessageCard -> {
-        message.topic = HTTPTOPIC + message.trackerId
+        message.topic = FolloRules.incomingTopic(message.visibleTopic, message.trackerId)
       }
       else -> {
         message.topic = "NOKEY"

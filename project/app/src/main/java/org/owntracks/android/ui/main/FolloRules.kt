@@ -32,4 +32,8 @@ object FolloRules {
 
   /** Whether a leader's last fix (epoch seconds) is recent enough to show. */
   fun leaderFresh(lastFixS: Long, nowS: Long): Boolean = nowS - lastFixS <= LEADER_STALE_S
+
+  /** Contact id of a location that arrived over HTTP: the topic in the body, else upstream's pseudo topic. */
+  fun incomingTopic(visibleTopic: String, trackerId: String?): String =
+      visibleTopic.ifBlank { "owntracks/http/" + (trackerId ?: "") }
 }

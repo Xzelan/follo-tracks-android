@@ -29,6 +29,13 @@ class FolloRulesTest {
   }
 
   @Test
+  fun `a teammate arriving over HTTP keeps the server's topic as their contact id`() {
+    assertEquals("owntracks/follo-r/phone", FolloRules.incomingTopic("owntracks/follo-r/phone", "R"))
+    assertEquals("owntracks/http/R", FolloRules.incomingTopic("", "R"))
+    assertEquals("owntracks/http/", FolloRules.incomingTopic("", null))
+  }
+
+  @Test
   fun `a leader is shown for ten minutes after their last fix, then not`() {
     val now = 1_792_600_000L
     assertTrue(FolloRules.leaderFresh(now, now))

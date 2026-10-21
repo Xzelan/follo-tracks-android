@@ -53,6 +53,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * phone itself), and when there are exactly two it draws the line between them, for every member of the team.
    */
   var leaders: List<FolloLeader>? = null
+  /**
+   * Who this phone draws (server 21 Oct 2026, Alex: "a line leader should see all their team"): a leader gets every
+   * teammate, a member gets the team's line leaders; never itself. Absent on older servers ⇒ fall back to [leaders].
+   */
+  var show: List<FolloLeader>? = null
 
   /** [poly] as (lat, lon) points, or null if absent or malformed. */
   fun polyPoints(): List<Pair<Double, Double>>? =

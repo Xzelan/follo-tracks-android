@@ -1321,18 +1321,23 @@ class MainActivity :
 
   private fun leaderTopics(): Set<String> = leaders().filter { !it.isSelf }.mapNotNull { it.topic }.toSet()
 
+  /** Topics the map draws: the server's `show` list (leader = whole team, member = the leaders), else the leaders. */
+  private fun shownTopics(): Set<String> =
+      viewModel.folloStatus.value?.message?.show?.filter { !it.isSelf && !it.topic.isNullOrBlank() }?.mapNotNull { it.topic }?.toSet()
+          ?: leaderTopics()
+
   /** A leader whose last fix is older than [LEADER_STALE_MS] is taken off the map rather than shown where they were. */
   private fun isFresh(contact: Contact): Boolean =
       contact.latLng != null && FolloRules.leaderFresh(contact.locationTimestamp, System.currentTimeMillis() / 1000)
 
   private fun showIfLeader(contact: Contact) {
-    if (contact.id in leaderTopics()) updateContactMarker(contact)
+    if (contact.id in shownTopics()) updateContactMarker(contact)
   }
 
   /** Markers for the team's leaders only; anyone else (other teammates, other teams) is taken off the map. */
   private fun syncContactMarkers() {
     if (!::map.isInitialized) return
-    val keep = leaderTopics().filter { viewModel.allContacts[it]?.let(::isFresh) == true }.toSet()
+    val keep = shownTopics().filter { viewModel.allContacts[it]?.let(::isFresh) == true }.toSet()
     val removed =
         map.overlays.removeAll { it is Marker && it.id.startsWith(CONTACT_PREFIX) && it.id.removePrefix(CONTACT_PREFIX) !in keep }
     viewModel.allContacts.values.filter { it.id in keep }.forEach(::updateContactMarker)
@@ -1428,7 +1433,7 @@ class MainActivity :
     lifecycleScope.launch {
       val bitmap = contactImageBindingAdapter.getBitmapFromCache(contact)
       val id = CONTACT_PREFIX + contact.id
-      if (contact.id !in leaderTopics() || !isFresh(contact)) return@launch // the status changed while the picture loaded
+      if (contact.id !in shownTopics() || !isFresh(contact)) return@launch // the status changed while the picture loaded
       val existing = map.overlays.firstOrNull { it is Marker && it.id == id } as Marker?
       if (existing != null) {
         // Every reply repeats the teammates (5 s in Move): touch the marker only when it really moved or

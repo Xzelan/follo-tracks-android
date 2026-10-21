@@ -23,6 +23,18 @@ class MessageFolloTest {
   }
 
   @Test
+  fun `show and leaders name teammates by topic, self excluded by the app`() {
+    val reply =
+        """[{"_type":"follo","state":"outside","team":"Test",
+            "leaders":[{"tid":"L","topic":"owntracks/samsungapp/phone","self":true},{"tid":"R","topic":"owntracks/follo-r/phone"}],
+            "show":[{"tid":"R","topic":"owntracks/follo-r/phone"},{"tid":"IP","topic":"owntracks/iphoneapp/phone"}]}]"""
+    val follo = parser.fromJson(reply.byteInputStream()).filterIsInstance<MessageFollo>().single()
+    assertEquals(listOf("owntracks/follo-r/phone", "owntracks/iphoneapp/phone"), follo.show!!.map { it.topic })
+    assertTrue(follo.leaders!!.single { it.tid == "L" }.isSelf)
+    assertEquals(2, follo.leaders!!.size)
+  }
+
+  @Test
   fun `status survives a save and load round trip`() {
     val original =
         MessageFollo().apply {
