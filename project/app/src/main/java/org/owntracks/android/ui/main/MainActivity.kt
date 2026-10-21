@@ -28,6 +28,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.ViewCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
@@ -227,6 +228,14 @@ class MainActivity :
     if (camera == Camera.NAV) setNavLook(true)
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
+    // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
+    binding.card.setOnLongClickListener {
+      if (requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
+        Toast.makeText(this, R.string.follo_send_now, Toast.LENGTH_SHORT).show()
+        startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+      }
+      true
+    }
 
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -276,6 +285,8 @@ class MainActivity :
               }
               .collect {
                 drawAreaBox(viewModel.folloStatus.value?.message) // hides the area once its window ends
+                syncContactMarkers() // and takes a leader off the map once their fix is stale
+                drawPair()
                 render()
               }
         }
@@ -299,12 +310,12 @@ class MainActivity :
           }
         }
         launch { viewModel.lastPublished.collect { render() } }
-        launch { viewModel.track.collect(::drawTrack) }
+        launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
           viewModel.tileUrlState.collect {
             if (::map.isInitialized) {
-              map.setTileSource(FolloTileSource(it))
+              map.setTileSource(FolloTileSource.of(it))
               map.invalidate()
             }
           }
@@ -328,7 +339,8 @@ class MainActivity :
     // Let the camera place the dot afresh for the new shape of the visible map.
     centredOnce = false
     camRef = null
-    if (camera == Camera.NAV) map.post {
+    // After the layout pass, so visible() sees the side panel where it now is (not where it was).
+    if (camera == Camera.NAV) binding.root.doOnLayout {
       setNavLook(true)
       requestNavFrame() // arrow back on its 80 % spot in the new shape at once
     }
@@ -502,6 +514,7 @@ class MainActivity :
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
     // Android refuses to show the "all the time" prompt twice; after that only Settings can fix it.
     if (preferences.userDeclinedEnableBackgroundLocationPermissions) {
+      Toast.makeText(this, R.string.follo_location_howto, Toast.LENGTH_LONG).show()
       openAppSettings()
       return
     }
@@ -542,9 +555,10 @@ class MainActivity :
           if (preferences.userDeclinedEnableLocationPermissions &&
               !shouldShowRequestPermissionRationale(
                   android.Manifest.permission.ACCESS_FINE_LOCATION
-              ))
-              openAppSettings()
-          else requestLocation()
+              )) {
+            Toast.makeText(this, R.string.follo_location_howto, Toast.LENGTH_LONG).show()
+            openAppSettings()
+          } else requestLocation()
       Kind.LOCATION_OFF -> settingsLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
       Kind.NEED_BACKGROUND -> requestBackgroundLocation()
       Kind.NEED_NOTIFICATIONS ->
@@ -575,8 +589,8 @@ class MainActivity :
         return Banner(Kind.LOCATION_OFF, red, s(R.string.follo_action_title), s(R.string.follo_location_off_sub), s(R.string.follo_location_off_btn))
     if (!requirementsChecker.hasBackgroundLocationPermission() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
         return Banner(Kind.NEED_BACKGROUND, red, s(R.string.follo_action_title), s(R.string.follo_bg_sub), s(R.string.follo_bg_btn))
-    if (!notificationPermissionRequester.hasPermission())
-        return Banner(Kind.NEED_NOTIFICATIONS, red, s(R.string.follo_action_title), s(R.string.follo_notif_sub), s(R.string.follo_notif_btn))
+    // Notifications off is not red: the location service runs without them, its notification is just hidden
+    // (review 21 Oct 2026). The card carries a one-line note instead; the setup chain still asks once.
     if (!isIgnoringBatteryOptimizations())
         return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title), s(R.string.follo_battery_sub), s(R.string.follo_battery_btn))
     val server =
@@ -708,6 +722,12 @@ class MainActivity :
     viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }
     val text = parts.joinToString(" · ")
     if (binding.last.text.toString() != text) binding.last.text = text
+    val note =
+        if (b.kind != Kind.NOT_SET_UP && !promptInFlight && !notificationPermissionRequester.hasPermission())
+            getString(R.string.follo_notif_off_note)
+        else ""
+    if (binding.note.text.toString() != note) binding.note.text = note
+    binding.note.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
   }
 
   // ── Map ───────────────────────────────────────────────────────────────────────────────
@@ -719,21 +739,34 @@ class MainActivity :
       osmdroidTileCache = noBackupFilesDir.resolve("osmdroid/tiles")
     }
     map = binding.map
-    map.setTileSource(FolloTileSource(viewModel.tileUrl))
+    map.setTileSource(FolloTileSource.of(viewModel.tileUrl))
     map.setMultiTouchControls(true)
     // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
-    // tapped. Pinch-zooming keeps following.
+    // tapped. A pinch (any second finger during the touch) keeps following and keeps its zoom; the decision
+    // is made when the fingers lift, so a pinch that starts one-fingered does not pause (review 21 Oct 2026).
+    // While any finger is down the camera leaves the map alone.
     var downX = 0f
     var downY = 0f
+    var dragged = false
+    var twoFingers = false
     val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
     map.setOnTouchListener { _, e ->
       when (e.actionMasked) {
         android.view.MotionEvent.ACTION_DOWN -> {
           downX = e.x
           downY = e.y
+          dragged = false
+          twoFingers = false
+          gestureActive = true
         }
+        android.view.MotionEvent.ACTION_POINTER_DOWN -> twoFingers = true
         android.view.MotionEvent.ACTION_MOVE ->
-            if (e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) > slop) followPaused = true
+            if (e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) > slop) dragged = true
+        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+          gestureActive = false
+          if (dragged && !twoFingers) followPaused = true
+          if (camera == Camera.NAV && !followPaused) requestNavFrame() // arrow back on its spot at the new zoom
+        }
       }
       false
     }
@@ -814,13 +847,15 @@ class MainActivity :
   private var camRefAt = 0L
   private var bearing = 0f
   private var hasBearing = false
+  /** When [bearing] last changed (elapsedRealtime). */
+  private var bearingAt = 0L
   /** The direction shown at the top of the screen in the heading-up styles. */
   private var upBearing = 0f
   private var camAnim: android.animation.ValueAnimator? = null
 
   private fun followCamera(l: Location) {
     if (!::map.isInitialized || map.width == 0 || map.height == 0) return
-    if (followPaused) {
+    if (followPaused || gestureActive) {
       // The map stays where the volunteer dragged it, but the arrow keeps showing where they are
       if (camera == Camera.NAV) {
         navTo = l.toGeoPoint()
@@ -840,6 +875,7 @@ class MainActivity :
       val b = ref.bearingTo(l)
       bearing = if (hasBearing) blendAngle(bearing, b, 0.5f) else b
       hasBearing = true
+      bearingAt = SystemClock.elapsedRealtime()
     }
     // Glide over the time it took to get here, so the map moves continuously, not in hops.
     val ms = if (ref == null) 0L else (now - camRefAt).coerceIn(500L, 3000L)
@@ -1043,7 +1079,9 @@ class MainActivity :
     }
     val dt = if (lastFrameAt == 0L) FRAME_MIN_MS / 1000f else ((now - lastFrameAt) / 1000f).coerceAtMost(0.5f)
     lastFrameAt = now
-    val target = compass.heading() ?: bearing.takeIf { hasBearing }
+    // The compass turns the map; without it, the walking direction does — but only a walking direction found
+    // AFTER the compass went quiet, so a phone standing still never flips between the two.
+    val target = compass.heading() ?: bearing.takeIf { hasBearing && bearingAt > compass.lastReadingAt() }
     var turning = false
     if (target != null) {
       if (!headingInit) {
@@ -1059,7 +1097,7 @@ class MainActivity :
     }
     val gliding = navGlideMs > 0L && now < navGlideStart + navGlideMs
     val arrow = navArrow
-    if (!followPaused) {
+    if (!followPaused && !gestureActive) {
       val pos = navPosition(now)
       if (pos != null) {
         upBearing = shownHeading
@@ -1080,6 +1118,8 @@ class MainActivity :
   private var centredOnce = false
   /** True once the volunteer drags the map themselves; tapping the card brings following back. */
   private var followPaused = false
+  /** True while a finger is on the map: the camera does not move it under the finger. */
+  private var gestureActive = false
 
   /**
    * The visible middle of the map (between the banner and the card), where the dot is kept, and the
@@ -1224,28 +1264,51 @@ class MainActivity :
   private fun aboveAreaAndTrack(): Int =
       map.overlays.indexOfLast { (it is Polygon && it.id == AREA_ID) || (it is Polyline && it.id == TRACK_ID) } + 1
 
-  private var drawnTrack: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>? = null
+  private var drawnTrackSerial = -1
+  /** The segment being walked right now; new points are appended to it. */
+  private var trackTail: Polyline? = null
 
-  /** The phone's own walking track: magenta like QField tracklogs, above the area, below the pair line. */
-  private fun drawTrack(points: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>) {
-    if (!::map.isInitialized || points == drawnTrack) return
-    drawnTrack = points
-    map.overlays.removeAll { it is Polyline && it.id == TRACK_ID }
-    val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
-    viewModel.trackSegments(points).reversed().forEach { seg ->
-      map.overlays.add(
-          at,
-          Polyline(map).apply {
-            id = TRACK_ID
-            infoWindow = null
-            setPoints(seg.map { GeoPoint(it.lat, it.lon) })
-            outlinePaint.color = getColor(R.color.follo_track)
-            outlinePaint.strokeWidth = resources.displayMetrics.density * 4
-            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
-          },
-      )
+  private fun trackLine(points: List<GeoPoint>) =
+      Polyline(map).apply {
+        id = TRACK_ID
+        infoWindow = null
+        setPoints(points)
+        outlinePaint.color = getColor(R.color.follo_track)
+        outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+      }
+
+  /**
+   * The phone's own walking track: magenta like QField tracklogs, above the area, below the pair line. Each fix is
+   * appended to the current line; the whole track is rebuilt only on load, clear, trim or after missed updates
+   * (review 21 Oct 2026: a full rebuild per fix stuttered after hours of walking).
+   */
+  private fun drawTrack(u: org.owntracks.android.data.repos.FolloTrackRepo.Update) {
+    if (!::map.isInitialized || u.serial == drawnTrackSerial) return
+    val incremental = !u.reset && u.last != null && u.serial == drawnTrackSerial + 1 && trackTail != null
+    drawnTrackSerial = u.serial
+    if (incremental) {
+      val lp = u.last!!
+      val p = GeoPoint(lp.lat, lp.lon)
+      if (u.newSegment) {
+        val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
+        trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
+      } else trackTail!!.addPoint(p)
+      map.invalidate()
+      return
     }
+    map.overlays.removeAll { it is Polyline && it.id == TRACK_ID }
+    trackTail = null
+    val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
+    val points = viewModel.trackSnapshot()
+    val segments = viewModel.trackSegments(points)
+    segments.reversed().forEach { seg -> map.overlays.add(at, trackLine(seg.map { GeoPoint(it.lat, it.lon) })) }
+    // The tail is the last segment, or a fresh one-point line when the newest point stands alone
+    val lastSeg = segments.lastOrNull()
+    trackTail =
+        if (lastSeg != null && lastSeg.last() == points.lastOrNull()) map.overlays.filterIsInstance<Polyline>().last { it.id == TRACK_ID }
+        else points.lastOrNull()?.let { trackLine(listOf(GeoPoint(it.lat, it.lon))).also { l -> map.overlays.add(at, l) } }
     map.invalidate()
   }
 
@@ -1255,6 +1318,10 @@ class MainActivity :
 
   private fun leaderTopics(): Set<String> = leaders().filter { !it.isSelf }.mapNotNull { it.topic }.toSet()
 
+  /** A leader whose last fix is older than [LEADER_STALE_MS] is taken off the map rather than shown where they were. */
+  private fun isFresh(contact: Contact): Boolean =
+      contact.latLng != null && FolloRules.leaderFresh(contact.locationTimestamp, System.currentTimeMillis() / 1000)
+
   private fun showIfLeader(contact: Contact) {
     if (contact.id in leaderTopics()) updateContactMarker(contact)
   }
@@ -1262,7 +1329,7 @@ class MainActivity :
   /** Markers for the team's leaders only; anyone else (other teammates, other teams) is taken off the map. */
   private fun syncContactMarkers() {
     if (!::map.isInitialized) return
-    val keep = leaderTopics()
+    val keep = leaderTopics().filter { viewModel.allContacts[it]?.let(::isFresh) == true }.toSet()
     val removed =
         map.overlays.removeAll { it is Marker && it.id.startsWith(CONTACT_PREFIX) && it.id.removePrefix(CONTACT_PREFIX) !in keep }
     viewModel.allContacts.values.filter { it.id in keep }.forEach(::updateContactMarker)
@@ -1278,14 +1345,19 @@ class MainActivity :
 
   /**
    * The line between the team's two line leaders (Alex, 21 Oct 2026), seen by everyone in the team: light grey, CYAN
-   * when they are PAIR_M ± PAIR_TOL_M apart (the 20 m strip), distance at its middle. A leader's own end is its arrow.
-   * Not exactly two leaders, or no position for one of them, = no line.
+   * when they are PAIR_M ± PAIR_TOL_M apart (the 20 m strip), distance at its middle. A leader's own end is drawn at
+   * its arrow, but the distance (and so the colour) is measured from the latest fix: the arrow eases and can lag a
+   * few metres, which matters inside a ± 1 m band. Not exactly two leaders, no position for one of them, or a
+   * partner whose fix is stale, = no line.
    */
   private fun drawPair() {
     if (!::map.isInitialized) return
     val two = leaders().takeIf { it.size == 2 }
-    val ends =
-        two?.map { ld -> if (ld.isSelf) ownDrawnPosition() else viewModel.allContacts[ld.topic!!]?.latLng?.let { GeoPoint(it.latitude.value, it.longitude.value) } }
+    fun partner(ld: org.owntracks.android.model.messages.FolloLeader): GeoPoint? =
+        viewModel.allContacts[ld.topic!!]?.takeIf(::isFresh)?.latLng?.let { GeoPoint(it.latitude.value, it.longitude.value) }
+    val ends = two?.map { ld -> if (ld.isSelf) ownDrawnPosition() else partner(ld) }
+    val fix = (viewModel.currentLocation.value ?: viewModel.lastPublished.value)?.let { GeoPoint(it.latitude, it.longitude) }
+    val measured = two?.map { ld -> if (ld.isSelf) fix ?: ownDrawnPosition() else partner(ld) }
     val me = ends?.getOrNull(0)
     val other = ends?.getOrNull(1)
     val line = map.overlays.firstOrNull { it is Polyline && it.id == PAIR_ID } as Polyline?
@@ -1300,7 +1372,7 @@ class MainActivity :
     }
     val a = me
     val b = other
-    val d = a.distanceToAsDouble(b)
+    val d = measured!![0]!!.distanceToAsDouble(measured[1]!!)
     val ok = kotlin.math.abs(d - PAIR_M) <= PAIR_TOL_M
     val colour = if (ok) Color.rgb(0, 229, 255) else Color.rgb(154, 163, 160)
     val l =
@@ -1348,11 +1420,12 @@ class MainActivity :
 
   private fun updateContactMarker(contact: Contact) {
     val latLng = contact.latLng ?: return
+    if (!isFresh(contact)) return
     val point = GeoPoint(latLng.latitude.value, latLng.longitude.value)
     lifecycleScope.launch {
       val bitmap = contactImageBindingAdapter.getBitmapFromCache(contact)
       val id = CONTACT_PREFIX + contact.id
-      if (contact.id !in leaderTopics()) return@launch // the status changed while the picture loaded
+      if (contact.id !in leaderTopics() || !isFresh(contact)) return@launch // the status changed while the picture loaded
       val existing = map.overlays.firstOrNull { it is Marker && it.id == id } as Marker?
       if (existing != null) {
         // Every reply repeats the teammates (5 s in Move): touch the marker only when it really moved or

@@ -806,6 +806,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   fun reInitializeLocationRequests() {
     Timber.v("Reinitializing location requests")
+    // FOLLO: a permission granted after the service started means the geofences were never registered
+    lifecycleScope.launch { setupGeofences() }
     runThingsOnOtherThreads.postOnServiceHandlerDelayed(
         {
           if (setupLocationRequest().isSuccess) {

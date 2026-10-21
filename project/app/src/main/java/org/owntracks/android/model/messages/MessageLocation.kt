@@ -125,7 +125,8 @@ open class MessageLocation(
   }
 
   override fun toString(): String =
-      "[MessageLocation id=$messageId ts=${Instant.fromEpochSeconds(timestamp)},lat=$latitude,long=$longitude,created_at=${createdAt},trigger=$trigger]"
+      // FOLLO: no coordinates here, because this string ends up in logcat (and bug reports) on every failed send.
+      "[MessageLocation id=$messageId ts=${Instant.fromEpochSeconds(timestamp)},created_at=${createdAt},trigger=$trigger]"
 
   override fun annotateFromPreferences(preferences: Preferences) {
     topic = preferences.pubTopicLocations

@@ -42,9 +42,16 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
   private var declinationAt: Location? = null
   private var target: Float? = null
   private var targetAt = 0L
+  private var unreliable = false
 
-  /** The latest true heading, or null when there has been no usable reading for [STALE_MS] (or no compass at all). */
-  fun heading(): Float? = target?.takeIf { SystemClock.elapsedRealtime() - targetAt < STALE_MS }
+  /**
+   * The latest true heading, or null when there has been no usable reading for [STALE_MS] (or no compass at all), or
+   * the sensor reports itself unreliable (needs a figure-of-eight).
+   */
+  fun heading(): Float? = target?.takeIf { !unreliable && SystemClock.elapsedRealtime() - targetAt < STALE_MS }
+
+  /** When the last reading arrived (elapsedRealtime), 0 if none yet. */
+  fun lastReadingAt(): Long = targetAt
 
   fun start() {
     if (rotationSensor != null) {
@@ -109,7 +116,10 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
     }
   }
 
-  override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+  override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+    if (sensor?.type == Sensor.TYPE_ROTATION_VECTOR || sensor?.type == Sensor.TYPE_MAGNETIC_FIELD)
+        unreliable = accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE
+  }
 
   @Suppress("DEPRECATION")
   private fun displayRotation(): Int =
@@ -121,8 +131,11 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
   }
 
   companion object {
-    /** Without a reading for this long the camera falls back to the walking direction. */
-    const val STALE_MS = 3_000L
+    /**
+     * Without a reading for this long the camera falls back to the walking direction. Long on purpose: a phone that
+     * is standing still must not flip between the compass and the last walking direction.
+     */
+    const val STALE_MS = 30_000L
     const val DEADBAND_DEG = 2f
     private const val DECLINATION_REFRESH_M = 10_000f
     private const val LOW_PASS = 0.15f

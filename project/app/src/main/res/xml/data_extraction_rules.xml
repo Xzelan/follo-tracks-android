@@ -6,6 +6,13 @@
         <include
             domain="sharedpref"
             path="." />
+        <!-- FOLLO: the walking track and the server password stay on the phone -->
+        <exclude
+            domain="sharedpref"
+            path="follo_track.xml" />
+        <exclude
+            domain="sharedpref"
+            path="au.org.follo.tracks_preferences.xml" />
         <exclude domain="external" />
     </cloud-backup>
     <device-transfer>

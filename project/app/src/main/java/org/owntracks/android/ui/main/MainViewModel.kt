@@ -95,10 +95,12 @@ constructor(
 
   val lastPublished: StateFlow<Location?> = locationRepo.currentPublishedLocation
 
-  /** The phone's own walking track (orange line). */
-  val track: StateFlow<List<FolloTrackRepo.Point>> = folloTrackRepo.points
+  /** Changes to the phone's own walking track (magenta line). */
+  val trackUpdates: StateFlow<FolloTrackRepo.Update> = folloTrackRepo.updates
 
   fun addTrack(l: Location) = folloTrackRepo.add(l)
+
+  fun trackSnapshot() = folloTrackRepo.snapshot()
 
   fun trackSegments(points: List<FolloTrackRepo.Point>) = folloTrackRepo.segments(points)
 
@@ -217,8 +219,9 @@ constructor(
     return SetupLink.Ready(config, host, tid)
   }
 
-  /** Applies a confirmed setup link and marks the phone as set up. */
-  fun applySetup(config: MessageConfiguration, onDone: () -> Unit) {
+  /** Applies a confirmed setup link (only the settings FOLLO needs, [FolloRules.importable]) and marks the phone as set up. */
+  fun applySetup(link: MessageConfiguration, onDone: () -> Unit) {
+    val config = FolloRules.importable(link)
     viewModelScope.launch(ioDispatcher) {
       preferences.importConfiguration(config)
       if (config.waypoints.isNotEmpty()) waypointsRepo.importFromMessage(config.waypoints)

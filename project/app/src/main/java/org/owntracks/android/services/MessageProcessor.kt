@@ -619,7 +619,7 @@ constructor(
       message.name?.takeIf { it.isNotBlank() && it != preferences.displayName }?.let {
         preferences.displayName = it
       }
-      message.tile?.takeIf { it.isNotBlank() && it != preferences.mapTileUrl }?.let {
+      message.tile?.takeIf { it.startsWith("https://") && it != preferences.mapTileUrl }?.let {
         preferences.mapTileUrl = it
       }
       messageReceivedIdlingResource.remove(message)

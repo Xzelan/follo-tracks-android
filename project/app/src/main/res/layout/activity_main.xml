@@ -103,5 +103,14 @@
             android:layout_marginTop="4dp"
             android:textColor="@color/follo_subtext"
             android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/follo_note"
+            android:textSize="14sp"
+            android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

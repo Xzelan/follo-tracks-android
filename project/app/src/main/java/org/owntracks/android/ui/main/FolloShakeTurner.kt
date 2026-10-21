@@ -47,6 +47,8 @@ class FolloShakeTurner(private val activity: Activity, private val onHint: () ->
   private var peakSign = 0
   private var lastTurn = 0L
   private var lastHint = 0L
+  /** Last time the phone moved more than [QUIET_G] outside a shake burst: a burst must follow [QUIET_BEFORE_MS] of calm. */
+  private var lastLoudAt = 0L
 
   /** Locks the screen the way it is now. Call once, from onCreate. */
   fun lockCurrent() {
@@ -68,6 +70,7 @@ class FolloShakeTurner(private val activity: Activity, private val onHint: () ->
     primed = false
     held = null
     peakTimes.clear()
+    lastLoudAt = 0L
   }
 
   override fun onSensorChanged(event: SensorEvent) {
@@ -96,11 +99,16 @@ class FolloShakeTurner(private val activity: Activity, private val onHint: () ->
       heldSince = now
     }
 
-    // Shake: spikes of movement (gravity taken out) that flip direction along the main axis.
+    // Shake: spikes of movement (gravity taken out) that flip direction along the main axis, after a moment of
+    // calm. Walking or jogging with the phone sideways gives spikes too, but never the calm before them.
     for (i in 0..2) lin[i] = v[i] - gravity[i]
     var axis = 0
     for (i in 1..2) if (abs(lin[i]) > abs(lin[axis])) axis = i
-    if (abs(lin[axis]) > SHAKE_G * SensorManager.GRAVITY_EARTH) {
+    val mag = abs(lin[axis])
+    while (peakTimes.isNotEmpty() && now - peakTimes.first() > SHAKE_WINDOW_MS) peakTimes.removeFirst()
+    val inBurst = peakTimes.isNotEmpty()
+    if (!inBurst) peakSign = 0 // a burst that petered out: the next spike of either sign may start a new one
+    if (mag > SHAKE_G * SensorManager.GRAVITY_EARTH) {
       val sign = if (lin[axis] > 0) 1 else -1
       if (axis != peakAxis) {
         peakTimes.clear()
@@ -108,15 +116,23 @@ class FolloShakeTurner(private val activity: Activity, private val onHint: () ->
         peakSign = 0
       }
       if (sign != peakSign) {
-        peakSign = sign
-        peakTimes.addLast(now)
-        while (peakTimes.isNotEmpty() && now - peakTimes.first() > SHAKE_WINDOW_MS) peakTimes.removeFirst()
-        if (peakTimes.size >= SHAKE_PEAKS) {
-          peakTimes.clear()
-          peakSign = 0
-          onShake(now)
+        if (org.owntracks.android.BuildConfig.DEBUG)
+            timber.log.Timber.d("shake peak axis=%d sign=%d mag=%.1f peaks=%d quietFor=%d held=%s", axis, sign, mag, peakTimes.size, now - lastLoudAt, held)
+        if (peakTimes.isEmpty() && now - lastLoudAt < QUIET_BEFORE_MS) {
+          lastLoudAt = now // not calm beforehand: this is walking, not a shake
+        } else {
+          peakSign = sign
+          peakTimes.addLast(now)
+          if (peakTimes.size >= SHAKE_PEAKS) {
+            peakTimes.clear()
+            peakSign = 0
+            lastLoudAt = now
+            onShake(now)
+          }
         }
       }
+    } else if (!inBurst && mag > QUIET_G * SensorManager.GRAVITY_EARTH) {
+      lastLoudAt = now
     }
 
     val h = held
@@ -148,6 +164,9 @@ class FolloShakeTurner(private val activity: Activity, private val onHint: () ->
     const val SHAKE_PEAKS = 3
     const val SHAKE_G = 0.7f
     const val SHAKE_WINDOW_MS = 1_000L
+    /** Movement above this in the [QUIET_BEFORE_MS] before the first spike means the phone was not at rest. */
+    const val QUIET_G = 0.3f
+    const val QUIET_BEFORE_MS = 500L
     const val WAY_TOLERANCE_DEG = 30.0
     /** Within 30° of flat (sin 30° of gravity in the screen's plane) the way it is held is undecided. */
     const val FLAT_SIN = 0.5f

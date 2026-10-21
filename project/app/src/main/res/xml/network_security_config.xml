@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<network-security-config xmlns:tools="http://schemas.android.com/tools">
-    <base-config
-        cleartextTrafficPermitted="true"
-        tools:ignore="InsecureBaseConfiguration">
+<!-- FOLLO Tracks talks only to FOLLO's server and the imagery host, both https; nothing in the clear, no user CAs. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates
-                src="user"
-                tools:ignore="AcceptsUserCertificates" />
         </trust-anchors>
     </base-config>
 </network-security-config>

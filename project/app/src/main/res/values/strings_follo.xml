@@ -47,6 +47,9 @@
     <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
     <string name="follo_area_label">Search area</string>
     <string name="follo_shake_hint">Give the phone a gentle shake to turn the screen</string>
+    <string name="follo_location_howto">Permissions › Location › Allow all the time</string>
+    <string name="follo_notif_off_note">Notifications are off — the app still works</string>
+    <string name="follo_send_now">Sending your position…</string>
 
     <string name="follo_setup_title">Set up FOLLO Tracks?</string>
     <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>
