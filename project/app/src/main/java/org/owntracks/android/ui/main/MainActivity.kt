@@ -263,7 +263,10 @@ class MainActivity :
               ) { _, _, _, endpoint, _ ->
                 trackSendFailures(endpoint.state)
               }
-              .collect { render() }
+              .collect {
+                drawAreaBox(viewModel.folloStatus.value?.message) // hides the area once its window ends
+                render()
+              }
         }
         launch { viewModel.lastSentAt.collect { render() } }
         launch {
@@ -276,12 +279,14 @@ class MainActivity :
         // The phone decides green/grey at the area edge itself, so every new fix may change it.
         launch {
           viewModel.currentLocation.collect {
+            it?.let(viewModel::addTrack)
             it?.let(::followCamera)
             drawPair()
             render()
           }
         }
         launch { viewModel.lastPublished.collect { render() } }
+        launch { viewModel.track.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
           viewModel.tileUrlState.collect {
@@ -341,6 +346,7 @@ class MainActivity :
   }
 
   override fun onStop() {
+    viewModel.saveTrack()
     unbindService(serviceConnection)
     super.onStop()
   }
@@ -781,7 +787,12 @@ class MainActivity :
   private var camAnim: android.animation.ValueAnimator? = null
 
   private fun followCamera(l: Location) {
-    if (!::map.isInitialized || map.width == 0 || map.height == 0 || followPaused) return
+    if (!::map.isInitialized || map.width == 0 || map.height == 0) return
+    if (followPaused) {
+      // The map stays where the volunteer dragged it, but the arrow keeps showing where they are
+      if (camera == Camera.NAV) navArrow?.let { it.position = l.toGeoPoint(); map.invalidate() }
+      return
+    }
     // Standing still: the dot may wobble by a few metres, the map must not. Only movement beyond the
     // fix's own accuracy (at least JITTER_M) moves the camera or changes the travel direction.
     val ref = camRef
@@ -855,7 +866,6 @@ class MainActivity :
   private var navOn = false
 
   private fun setNavLook(on: Boolean) {
-    val wasOn = navOn
     navOn = on
     if (on) {
       myLocationOverlay?.let { map.overlays.remove(it) }
@@ -868,24 +878,12 @@ class MainActivity :
                 infoWindow = null
               }
       navArrow?.let { if (it !in map.overlays) map.overlays.add(it) }
-      scaleBar?.let { map.overlays.remove(it) } // a scale bar means nothing on a tilted map
-      // The tilt magnifies the map by NAV_SCALE; zoom out by as much so the ground near the arrow
-      // keeps the same scale as the other styles.
-      if (!wasOn) { // only once: a rotation re-applies the look without zooming out again
-        navZoomShift = kotlin.math.ln(NAV_SCALE.toDouble()) / kotlin.math.ln(2.0)
-        map.controller.setZoom(map.zoomLevelDouble - navZoomShift)
-      }
-      map.post {
-        // Tilt the whole map back around the arrow's spot, like a navigation app's 3D view. The
-        // arrow's row stays put; the map above it recedes, so more lies ahead.
-        val v = visible()
-        map.pivotX = v.centerX()
-        map.pivotY = v.top + NAV_DOWN * v.height()
-        map.cameraDistance = 5000f * resources.displayMetrics.density
-        map.rotationX = NAV_TILT_DEG
-        map.scaleX = NAV_SCALE
-        map.scaleY = NAV_SCALE
-      }
+      scaleBar?.let { map.overlays.remove(it) }
+      // Alex 21 Oct 2026: no tilt. A flat, top-down map that turns with you; the arrow's spot is
+      // 80 % of the way down the visible map (headingUpCentre), the same on iOS.
+      map.rotationX = 0f
+      map.scaleX = 1f
+      map.scaleY = 1f
     } else {
       navArrow?.let { map.overlays.remove(it) }
       myLocationOverlay?.let { if (it !in map.overlays) map.overlays.add(it) }
@@ -1107,6 +1105,35 @@ class MainActivity :
    * are PAIR_M ± PAIR_TOL_M apart (the 20 m strip). The partner comes from the server's status ([MessageFollo.pair]);
    * its position is the teammate location the server already sends. No partner, or no fix for either, = no line.
    */
+  /** Index just above the search area and the walking track (the bottom map layers). */
+  private fun aboveAreaAndTrack(): Int =
+      map.overlays.indexOfLast { (it is Polygon && it.id == AREA_ID) || (it is Polyline && it.id == TRACK_ID) } + 1
+
+  private var drawnTrack: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>? = null
+
+  /** The phone's own walking track: orange, above the area, below the pair line. */
+  private fun drawTrack(points: List<org.owntracks.android.data.repos.FolloTrackRepo.Point>) {
+    if (!::map.isInitialized || points == drawnTrack) return
+    drawnTrack = points
+    map.overlays.removeAll { it is Polyline && it.id == TRACK_ID }
+    val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
+    viewModel.trackSegments(points).reversed().forEach { seg ->
+      map.overlays.add(
+          at,
+          Polyline(map).apply {
+            id = TRACK_ID
+            infoWindow = null
+            setPoints(seg.map { GeoPoint(it.lat, it.lon) })
+            outlinePaint.color = getColor(R.color.follo_track)
+            outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+            outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+          },
+      )
+    }
+    map.invalidate()
+  }
+
   private fun drawPair() {
     if (!::map.isInitialized) return
     val topic = viewModel.folloStatus.value?.message?.pair?.topic
@@ -1132,7 +1159,7 @@ class MainActivity :
               id = PAIR_ID
               infoWindow = null
               outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-            }.also { map.overlays.add(1.coerceAtMost(map.overlays.size), it) }
+            }.also { map.overlays.add(aboveAreaAndTrack(), it) }
     l.setPoints(listOf(a, b))
     l.outlinePaint.color = colour
     l.outlinePaint.strokeWidth = resources.displayMetrics.density * (if (ok) 5 else 4)
@@ -1203,6 +1230,7 @@ class MainActivity :
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
     private const val PAIR_ID = "follo-pair"
+    private const val TRACK_ID = "follo-track"
     private const val PAIR_M = 20.0
     private const val PAIR_TOL_M = 0.5
     private const val NO_SIGNAL_AFTER_MS = 10_000L
@@ -1218,8 +1246,6 @@ class MainActivity :
     private const val HEADING_DOWN = 0.75f
     private const val NAV_DOWN = 0.80f
     private const val START_ZOOM = 18.5
-    private const val NAV_TILT_DEG = 40f
-    private const val NAV_SCALE = 2.2f
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */

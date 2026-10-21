@@ -15,7 +15,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.3"
+val versionNameValue = "0.1.4"
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")

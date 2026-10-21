@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
 import org.owntracks.android.data.repos.FolloStatusRepo
+import org.owntracks.android.data.repos.FolloTrackRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
@@ -54,6 +55,7 @@ constructor(
     locationRepo: LocationRepo,
     endpointStateRepo: EndpointStateRepo,
     folloStatusRepo: FolloStatusRepo,
+    private val folloTrackRepo: FolloTrackRepo,
     private val deviceMetricsProvider: DeviceMetricsProvider,
     private val parser: Parser,
     @param:CoroutineScopes.IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -92,6 +94,15 @@ constructor(
   val setupCompleted = MutableStateFlow(preferences.setupCompleted)
 
   val lastPublished: StateFlow<Location?> = locationRepo.currentPublishedLocation
+
+  /** The phone's own walking track (orange line). */
+  val track: StateFlow<List<FolloTrackRepo.Point>> = folloTrackRepo.points
+
+  fun addTrack(l: Location) = folloTrackRepo.add(l)
+
+  fun trackSegments(points: List<FolloTrackRepo.Point>) = folloTrackRepo.segments(points)
+
+  fun saveTrack() = folloTrackRepo.save()
   val endpointState = endpointStateRepo.endpointState
   val queueLength = endpointStateRepo.endpointQueueLength
 
@@ -212,6 +223,7 @@ constructor(
       preferences.importConfiguration(config)
       if (config.waypoints.isNotEmpty()) waypointsRepo.importFromMessage(config.waypoints)
       (config["folloName"] as? String)?.let { preferences.displayName = it }
+      folloTrackRepo.clear() // a new setup starts a clean track
       preferences.setupCompleted = true
       setupCompleted.value = true
       Timber.i("FOLLO setup applied for tid=${preferences.tid}")

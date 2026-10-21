@@ -104,6 +104,9 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   @Inject lateinit var locationRepo: LocationRepo
 
+  /** Created with the service, so the walking track also records while the screen is off. */
+  @Inject lateinit var folloTrackRepo: org.owntracks.android.data.repos.FolloTrackRepo
+
   @Inject lateinit var runThingsOnOtherThreads: RunThingsOnOtherThreads
 
   @Inject lateinit var waypointsRepo: WaypointsRepo
