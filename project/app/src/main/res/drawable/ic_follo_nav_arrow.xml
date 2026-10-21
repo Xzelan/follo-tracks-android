@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Navigation-style "you" arrow (FOLLO nav camera): narrow blue chevron with a white edge, pointing up. -->
+<!-- Navigation-style "you" arrow (FOLLO nav camera): blue arrow with rounded corners and a white edge,
+     pointing up. Shape = IconPark "navigation" (ByteDance, Apache-2.0), shifted half a unit to sit centred.
+     The rounded corners come from a 4-unit round-joined stroke in the arrow's own colour; the white edge is
+     the same path stroked 1.6 units wider each side underneath. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="44dp"
-    android:height="44dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:width="38dp"
+    android:height="38dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="7.2"
+        android:strokeLineJoin="round"
+        android:pathData="M24,4L8.5,44L24,34.91L39.5,44Z" />
     <path
         android:fillColor="#1A73E8"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.6"
+        android:strokeColor="#1A73E8"
+        android:strokeWidth="4"
         android:strokeLineJoin="round"
-        android:pathData="M12,2L7,21L12,17.6L17,21Z" />
+        android:pathData="M24,4L8.5,44L24,34.91L39.5,44Z" />
 </vector>
