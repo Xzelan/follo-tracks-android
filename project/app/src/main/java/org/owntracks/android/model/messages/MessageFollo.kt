@@ -46,6 +46,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * line where sharing starts and stops, and is what the map draws.
    */
   var poly: List<List<Double>>? = null
+  /**
+   * Version of the boundary the server holds (21 Oct 2026). Sent with every reply; [poly] itself only comes when the
+   * phone's last post did not acknowledge this version (`fd.pv`), so a 10 KB outline is not repeated every 5 s.
+   */
+  var polyv: String? = null
   /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
   /**
@@ -58,6 +63,18 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * teammate, a member gets the team's line leaders; never itself. Absent on older servers ⇒ fall back to [leaders].
    */
   var show: List<FolloLeader>? = null
+
+  /**
+   * Carries the boundary over from the [previous] status when this reply names the same version but leaves the
+   * outline out: the server only repeats [poly] when the phone has not acknowledged [polyv]. A reply naming a
+   * different version without the outline leaves [poly] empty, so nothing stale is drawn until the next reply.
+   */
+  fun carryPolyFrom(previous: MessageFollo?) {
+    if (poly == null && polyv != null && previous?.poly != null && previous.polyv == polyv) poly = previous.poly
+  }
+
+  /** The version of the boundary this status actually holds, for the `fd.pv` acknowledgement. */
+  fun heldPolyVersion(): String? = if (poly != null) polyv else null
 
   /** [poly] as (lat, lon) points, or null if absent or malformed. */
   fun polyPoints(): List<Pair<Double, Double>>? =

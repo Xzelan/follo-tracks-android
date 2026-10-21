@@ -10,7 +10,8 @@ import kotlinx.serialization.Serializable
  *
  * fg 1 front app / 0 background · au always|inuse|denied · pr precise 0/1 · m monitoring mode ·
  * up seconds since the process started · lr launch reason (boot|update|user|service|?) · bt 1 if
- * the foreground service is running · lp battery saver · q positions queued · src trigger name
+ * the foreground service is running · lp battery saver · q positions queued · src trigger name ·
+ * pv version of the search boundary the phone holds (the server repeats `poly` only when this differs)
  */
 @Serializable
 data class FolloDiag(
@@ -24,4 +25,5 @@ data class FolloDiag(
     @SerialName("lp") val lp: Int? = null,
     @SerialName("q") val q: Int? = null,
     @SerialName("src") val src: String? = null,
+    @SerialName("pv") val pv: String? = null,
 )

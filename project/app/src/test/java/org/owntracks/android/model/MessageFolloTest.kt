@@ -53,6 +53,33 @@ class MessageFolloTest {
   }
 
   @Test
+  fun `boundary version is parsed and the outline carried over only for the same version`() {
+    val withPoly =
+        parser.fromJson("""[{"_type":"follo","state":"outside","polyv":"a1b2c3d4","poly":[[-26.63,153.03],[-26.62,153.03],[-26.62,153.04]]}]""".byteInputStream())
+            .filterIsInstance<MessageFollo>().single()
+    assertEquals("a1b2c3d4", withPoly.polyv)
+    assertEquals(3, withPoly.polyPoints()!!.size)
+    assertEquals("a1b2c3d4", withPoly.heldPolyVersion())
+
+    // same version, outline left out: keep the one we hold
+    val sameVersion = MessageFollo().apply { state = "sharing"; polyv = "a1b2c3d4" }
+    sameVersion.carryPolyFrom(withPoly)
+    assertEquals(3, sameVersion.polyPoints()!!.size)
+    assertEquals("a1b2c3d4", sameVersion.heldPolyVersion())
+
+    // new version, outline left out: hold nothing until the server sends it
+    val newVersion = MessageFollo().apply { state = "sharing"; polyv = "ffffffff" }
+    newVersion.carryPolyFrom(withPoly)
+    assertEquals(null, newVersion.poly)
+    assertEquals(null, newVersion.heldPolyVersion())
+
+    // no version at all (no window, or an area without an outline): nothing carried
+    val noWindow = MessageFollo().apply { state = "nosearch" }
+    noWindow.carryPolyFrom(withPoly)
+    assertEquals(null, noWindow.poly)
+  }
+
+  @Test
   fun `area box and window end are parsed`() {
     val reply =
         """[{"_type":"follo","state":"outside","box":"-26.631421,153.027650,-26.622437,153.037699","ends":1792421940}]"""

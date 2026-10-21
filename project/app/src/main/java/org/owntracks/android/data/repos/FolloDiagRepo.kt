@@ -26,6 +26,7 @@ class FolloDiagRepo
 constructor(
     @ApplicationContext private val context: Context,
     private val endpointStateRepo: EndpointStateRepo,
+    private val folloStatusRepo: FolloStatusRepo,
 ) {
   @Volatile private var launchReason: String? = null
 
@@ -67,6 +68,7 @@ constructor(
         lp = if (powerManager?.isPowerSaveMode == true) 1 else 0,
         q = endpointStateRepo.endpointQueueLength.value,
         src = trigger.name.lowercase(),
+        pv = folloStatusRepo.heldPolyVersion(),
     )
   }
 }

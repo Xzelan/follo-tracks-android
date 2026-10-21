@@ -28,6 +28,7 @@ constructor(@ApplicationContext context: Context, private val parser: Parser) {
   val lastSentAt = MutableStateFlow(prefs.getLong(KEY_LAST_SENT, 0L))
 
   fun setStatus(message: MessageFollo, receivedAt: Long = System.currentTimeMillis()) {
+    message.carryPolyFrom(status.value?.message)
     status.value = Status(message, receivedAt)
     try {
       prefs.edit().putString(KEY_JSON, parser.toJson(message)).putLong(KEY_AT, receivedAt).apply()
@@ -35,6 +36,9 @@ constructor(@ApplicationContext context: Context, private val parser: Parser) {
       Timber.w(e, "Could not persist FOLLO status")
     }
   }
+
+  /** Version of the boundary the phone holds right now, acknowledged to the server in every post (`fd.pv`). */
+  fun heldPolyVersion(): String? = status.value?.message?.heldPolyVersion()
 
   fun markSent(at: Long = System.currentTimeMillis()) {
     lastSentAt.value = at

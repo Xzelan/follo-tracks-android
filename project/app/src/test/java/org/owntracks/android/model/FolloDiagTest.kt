@@ -19,13 +19,14 @@ class FolloDiagTest {
           longitude = 153.03
           timestamp = 1792576065
           trackerId = "IP"
-          fd = FolloDiag(fg = 0, au = "always", pr = 1, m = 2, up = 345, lr = "boot", bt = 1, lp = 0, q = 3, src = "default")
+          fd = FolloDiag(fg = 0, au = "always", pr = 1, m = 2, up = 345, lr = "boot", bt = 1, lp = 0, q = 3, src = "default", pv = "a1b2c3d4")
         }
     val json = parser.toJsonPlain(message)
     assertTrue(json, json.contains("\"fd\":{"))
     assertTrue(json, json.contains("\"au\":\"always\""))
     assertTrue(json, json.contains("\"up\":345"))
     assertTrue(json, json.contains("\"src\":\"default\""))
+    assertTrue(json, json.contains("\"pv\":\"a1b2c3d4\""))
     assertTrue("fd must stay small: $json", json.substringAfter("\"fd\":").length < 150)
 
     val sparse = MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 1) }

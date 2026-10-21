@@ -17,7 +17,7 @@ val gmsImplementation: Configuration by configurations.creating
 
 val versionNameValue = "0.1.9"
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code was never uploaded
-val versionBuild = 0
+val versionBuild = 1
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
