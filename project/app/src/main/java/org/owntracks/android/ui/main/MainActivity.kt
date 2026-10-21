@@ -743,6 +743,7 @@ class MainActivity :
     }
     map = binding.map
     map.setTileSource(FolloTileSource.of(viewModel.tileUrl))
+    map.overlayManager.tilesOverlay = ShiftedTilesOverlay(map.tileProvider, this) // Esri sits 1.5 m north
     map.setMultiTouchControls(true)
     // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
     // tapped. A pinch (any second finger during the touch) keeps following and keeps its zoom; the decision
