@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.services.BackgroundService
 import timber.log.Timber
@@ -28,6 +29,7 @@ class StartBackgroundServiceReceiver : BroadcastReceiver() {
   }
 
   @Inject lateinit var preferences: Preferences
+  @Inject lateinit var folloDiagRepo: FolloDiagRepo
 
   override fun onReceive(context: Context, intent: Intent) {
     if (
@@ -47,6 +49,7 @@ class StartBackgroundServiceReceiver : BroadcastReceiver() {
         return
       }
       Timber.v("android.intent.action.BOOT_COMPLETED received")
+      folloDiagRepo.noteLaunch(if (Intent.ACTION_BOOT_COMPLETED == intent.action) "boot" else "update")
       val startIntent = Intent(context, BackgroundService::class.java)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         Timber.v("running startForegroundService")

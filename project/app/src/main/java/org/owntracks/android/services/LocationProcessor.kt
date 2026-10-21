@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
@@ -92,6 +93,7 @@ constructor(
     @param:Named("mockLocationIdlingResource")
     private val mockLocationIdlingResource: SimpleIdlingResource,
     @param:Named("nativeGeofencingAvailable") private val nativeGeofencingAvailable: Boolean,
+    private val folloDiagRepo: FolloDiagRepo,
 ) {
   private fun locationIsWithAccuracyThreshold(l: Location): Boolean =
       preferences.ignoreInaccurateLocations
@@ -258,6 +260,7 @@ constructor(
               this.trigger = trigger
               trackerId = preferences.tid.toString()
               inregions = calculateInRegions(loadedWaypoints)
+              fd = folloDiagRepo.build(trigger, preferences.monitoring)
             }
     Timber.v("Actually publishing location $location triggered by $trigger as message=$message")
     messageProcessor.queueMessageForSending(message)

@@ -118,6 +118,9 @@ open class MessageLocation(
 
   @SerialName("tid") var trackerId: String? = null
 
+  // FOLLO diagnostics (21 Oct 2026), see FolloDiag; only the FOLLO server reads it
+  @SerialName("fd") var fd: FolloDiag? = null
+
   override fun isValidMessage(): Boolean {
     // The deserializer validates that required fields are present in JSON
     // Constraints: timestamp > 0 and (trackerId is not empty OR visibleTopic is not empty)

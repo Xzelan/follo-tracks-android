@@ -54,6 +54,7 @@ import org.owntracks.android.BaseApp.Companion.NOTIFICATION_ID_ONGOING
 import org.owntracks.android.R
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
+import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointsRepo
 import org.owntracks.android.di.CoroutineScopes
@@ -97,6 +98,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   @Inject lateinit var scheduler: Scheduler
 
   @Inject lateinit var locationProcessor: LocationProcessor
+
+  @Inject lateinit var folloDiagRepo: FolloDiagRepo
 
   @Inject lateinit var geocoderProvider: GeocoderProvider
 
@@ -183,6 +186,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
     super.onCreate()
 
+    folloDiagRepo.noteLaunch("service")
     preferences.registerOnPreferenceChangedListener(this)
 
     // Initialize significant motion sensor
@@ -257,6 +261,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   override fun onDestroy() {
     Timber.v("Backgroundservice onDestroy")
+    folloDiagRepo.foregroundServiceRunning = false
     stopForeground(STOP_FOREGROUND_REMOVE)
     unregisterReceiver(powerBroadcastReceiver)
     significantMotionSensor.cancel()
@@ -437,6 +442,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
             ongoingNotification.getNotification(),
             FOREGROUND_SERVICE_TYPE_LOCATION,
         )
+        folloDiagRepo.foregroundServiceRunning = true
       } catch (e: ForegroundServiceStartNotAllowedException) {
         Timber.e(
             e,
@@ -450,8 +456,10 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           ongoingNotification.getNotification(),
           FOREGROUND_SERVICE_TYPE_LOCATION,
       )
+      folloDiagRepo.foregroundServiceRunning = true
     } else {
       startForeground(NOTIFICATION_ID_ONGOING, ongoingNotification.getNotification())
+      folloDiagRepo.foregroundServiceRunning = true
     }
   }
 

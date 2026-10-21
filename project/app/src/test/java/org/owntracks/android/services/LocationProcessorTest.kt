@@ -15,6 +15,7 @@ import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
+import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.InMemoryWaypointsRepo
 import org.owntracks.android.model.messages.MessageBase
@@ -78,6 +79,7 @@ class LocationProcessorTest {
             SimpleIdlingResource("publishResponseMessageIdlingResource", false),
             SimpleIdlingResource("mockLocationIdlingResource", false),
             false,
+            mock<FolloDiagRepo>(),
         )
 
     val firstLocation =
@@ -132,6 +134,7 @@ class LocationProcessorTest {
         SimpleIdlingResource("publishResponseMessageIdlingResource", false),
         SimpleIdlingResource("mockLocationIdlingResource", false),
         false,
+        mock<FolloDiagRepo>(),
     )
   }
 

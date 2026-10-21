@@ -60,6 +60,7 @@ import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import org.owntracks.android.R
 import org.owntracks.android.data.repos.ContactsRepoChange
+import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
 import org.owntracks.android.databinding.ActivityMainBinding
@@ -90,6 +91,7 @@ class MainActivity :
     WorkManagerInitExceptionNotifier by WorkManagerInitExceptionNotifier.Impl() {
 
   @Inject lateinit var preferences: Preferences
+  @Inject lateinit var folloDiagRepo: FolloDiagRepo
   @Inject lateinit var requirementsChecker: RequirementsChecker
   @Inject lateinit var notificationsStash: NotificationsStash
   @Inject lateinit var contactImageBindingAdapter: ContactImageBindingAdapter
@@ -205,6 +207,7 @@ class MainActivity :
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    folloDiagRepo.noteLaunch("user")
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
 
