@@ -12,8 +12,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateUtils
+import android.view.Choreographer
 import android.view.View
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -38,6 +40,7 @@ import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.combine
@@ -102,6 +105,10 @@ class MainActivity :
   private var promptInFlight = false
   /** The app's own explanation dialog, if one is up (it does not pause the activity). */
   private var ownDialog: androidx.appcompat.app.AlertDialog? = null
+  /** Which way the phone points: turns the map (NAV). */
+  private lateinit var compass: FolloCompass
+  /** Portrait / landscape only by tilt + a gentle shake. */
+  private lateinit var shakeTurner: FolloShakeTurner
 
   /** What the banner is showing; [kind] decides what the one button does. */
   private data class Banner(
@@ -211,6 +218,10 @@ class MainActivity :
       windowInsets
     }
 
+    compass = FolloCompass(this) { if (camera == Camera.NAV) requestNavFrame() }
+    shakeTurner =
+        FolloShakeTurner(this) { Toast.makeText(this, R.string.follo_shake_hint, Toast.LENGTH_SHORT).show() }
+    shakeTurner.lockCurrent()
     applyOrientation(resources.configuration.orientation)
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
@@ -236,16 +247,16 @@ class MainActivity :
           }
         }
         launch {
-          viewModel.allContacts.values.forEach(::updateContactMarker)
+          syncContactMarkers()
           viewModel.contactEvents.collect {
             when (it) {
               ContactsRepoChange.AllCleared -> {
                 map.overlays.removeAll { o -> o is Marker && o.id.startsWith(CONTACT_PREFIX) }
                 map.invalidate()
               }
-              is ContactsRepoChange.ContactAdded -> updateContactMarker(it.contact).also { drawPair() }
-              is ContactsRepoChange.ContactLocationUpdated -> updateContactMarker(it.contact).also { drawPair() }
-              is ContactsRepoChange.ContactCardUpdated -> updateContactMarker(it.contact)
+              is ContactsRepoChange.ContactAdded -> showIfLeader(it.contact).also { drawPair() }
+              is ContactsRepoChange.ContactLocationUpdated -> showIfLeader(it.contact).also { drawPair() }
+              is ContactsRepoChange.ContactCardUpdated -> showIfLeader(it.contact)
               is ContactsRepoChange.ContactRemoved -> {
                 map.overlays.removeAll { o -> o is Marker && o.id == CONTACT_PREFIX + it.contact.id }
                 map.invalidate()
@@ -272,6 +283,7 @@ class MainActivity :
         launch {
           viewModel.folloStatus.collect {
             drawAreaBox(it?.message)
+            syncContactMarkers()
             drawPair()
             render()
           }
@@ -280,6 +292,7 @@ class MainActivity :
         launch {
           viewModel.currentLocation.collect {
             it?.let(viewModel::addTrack)
+            it?.let(compass::updateDeclination)
             it?.let(::followCamera)
             drawPair()
             render()
@@ -315,7 +328,10 @@ class MainActivity :
     // Let the camera place the dot afresh for the new shape of the visible map.
     centredOnce = false
     camRef = null
-    if (camera == Camera.NAV) map.post { setNavLook(true) }
+    if (camera == Camera.NAV) map.post {
+      setNavLook(true)
+      requestNavFrame() // arrow back on its 80 % spot in the new shape at once
+    }
   }
 
   private fun applyOrientation(orientation: Int) {
@@ -356,6 +372,8 @@ class MainActivity :
     // A system prompt pauses us, so being resumed means it has gone; our own dialogs do not pause us.
     promptInFlight = ownDialog?.isShowing == true
     map.onResume()
+    compass.start()
+    shakeTurner.start()
     if (requirementsChecker.hasLocationPermissions()) {
       viewModel.requestLocationUpdates()
       myLocationOverlay?.enableMyLocation()
@@ -365,6 +383,8 @@ class MainActivity :
   }
 
   override fun onPause() {
+    compass.stop()
+    shakeTurner.stop()
     map.onPause()
     super.onPause()
   }
@@ -386,6 +406,7 @@ class MainActivity :
             camRef = null
             hasBearing = false
             upBearing = 0f
+            headingInit = false
             camAnim?.cancel()
             map.mapOrientation = 0f
             setNavLook(false)
@@ -716,6 +737,17 @@ class MainActivity :
       }
       false
     }
+    // A pinch zooms about the fingers; put the arrow back on its spot for the new scale.
+    map.addMapListener(
+        object : org.osmdroid.events.MapListener {
+          override fun onScroll(event: org.osmdroid.events.ScrollEvent?) = false
+
+          override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+            if (camera == Camera.NAV && !followPaused) requestNavFrame()
+            return false
+          }
+        }
+    )
     map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
@@ -790,7 +822,12 @@ class MainActivity :
     if (!::map.isInitialized || map.width == 0 || map.height == 0) return
     if (followPaused) {
       // The map stays where the volunteer dragged it, but the arrow keeps showing where they are
-      if (camera == Camera.NAV) navArrow?.let { it.position = l.toGeoPoint(); map.invalidate() }
+      if (camera == Camera.NAV) {
+        navTo = l.toGeoPoint()
+        navGlideMs = 0L
+        navArrow?.let { it.position = l.toGeoPoint() }
+        requestNavFrame()
+      }
       return
     }
     // Standing still: the dot may wobble by a few metres, the map must not. Only movement beyond the
@@ -819,15 +856,25 @@ class MainActivity :
         val near = ref == null || pt.x < v.left + mx || pt.x > v.right - mx || pt.y < v.top + my || pt.y > v.bottom - my
         if (near) glide(centreFor(l, lookAheadOffset(1.4f)), 0f, if (ref == null) 0L else 1200L)
       }
-      Camera.HEADING, Camera.HEADING_CALM, Camera.NAV -> {
+      Camera.NAV -> {
+        // Position glides from where the arrow is now; heading (compass) and position are applied together
+        // every frame in navFrame, so the two never fight.
+        val p = l.toGeoPoint()
+        val nowR = SystemClock.elapsedRealtime()
+        navFrom = if (ref == null) p else navPosition(nowR) ?: p
+        navTo = p
+        navGlideStart = nowR
+        navGlideMs = if (ref == null) 0L else ms
+        requestNavFrame()
+      }
+      Camera.HEADING, Camera.HEADING_CALM -> {
         if (hasBearing) {
           val turn = abs(((bearing - upBearing + 540f) % 360f) - 180f)
           if (camera != Camera.HEADING_CALM || turn >= CALM_TURN_DEG) upBearing = bearing
         }
-        val down = if (camera == Camera.NAV) NAV_DOWN else HEADING_DOWN
-        val centre = headingUpCentre(l.toGeoPoint(), down)
+        val centre = headingUpCentre(l.toGeoPoint(), HEADING_DOWN)
         val glideMs = if (ref == null) 0L else maxOf(ms, if (camera == Camera.HEADING_CALM) 1500L else 0L)
-        glide(centre, -upBearing, glideMs, arrowTo = if (camera == Camera.NAV) l.toGeoPoint() else null)
+        glide(centre, -upBearing, glideMs)
       }
     }
   }
@@ -837,13 +884,13 @@ class MainActivity :
    * its middle sideways): the centre lies ahead of the fix along [upBearing], and to one side of it
    * when the visible map is off-centre (landscape, where the status column is on the left).
    */
-  private fun headingUpCentre(p: GeoPoint, down: Float): GeoPoint {
+  private fun headingUpCentre(p: GeoPoint, down: Float, up: Float = upBearing): GeoPoint {
     val v = visible()
     val ox = v.centerX() - map.width / 2f // dot right of the view centre by ox
     val oy = v.top + down * v.height() - map.height / 2f // dot below the view centre by oy
     val pxPerM = map.projection.metersToPixels(1f)
-    return p.destinationPoint((oy / pxPerM).toDouble(), upBearing.toDouble())
-        .destinationPoint((ox / pxPerM).toDouble(), (upBearing - 90f).toDouble())
+    return p.destinationPoint((oy / pxPerM).toDouble(), up.toDouble())
+        .destinationPoint((ox / pxPerM).toDouble(), (up - 90f).toDouble())
   }
 
   /** The part of the map not covered by the status banner and the card, in map-view pixels. */
@@ -955,6 +1002,79 @@ class MainActivity :
           }
           start()
         }
+  }
+
+  // ── NAV camera: one frame loop for position and heading ─────────────────────────────────
+  // Alex 21 Oct 2026: the map turns with the COMPASS (the way the phone points), the arrow stays pointing up at 80 %
+  // down the visible map, centred sideways. Without a compass reading the walking direction turns it instead.
+  private var navFrom: GeoPoint? = null
+  private var navTo: GeoPoint? = null
+  private var navGlideStart = 0L
+  private var navGlideMs = 0L
+  /** The bearing shown at the top of the screen, eased toward the compass. */
+  private var shownHeading = 0f
+  private var headingInit = false
+  private var lastFrameAt = 0L
+  private var framePending = false
+  private val navFrameCallback = Choreographer.FrameCallback { navFrame() }
+
+  private fun requestNavFrame() {
+    if (framePending || !::map.isInitialized) return
+    framePending = true
+    Choreographer.getInstance().postFrameCallback(navFrameCallback)
+  }
+
+  /** Where the arrow is along the current glide. */
+  private fun navPosition(now: Long): GeoPoint? {
+    val to = navTo ?: return null
+    val from = navFrom ?: return to
+    if (navGlideMs <= 0L) return to
+    val f = ((now - navGlideStart).toFloat() / navGlideMs).coerceIn(0f, 1f)
+    return GeoPoint(from.latitude + (to.latitude - from.latitude) * f, from.longitude + (to.longitude - from.longitude) * f)
+  }
+
+  private fun navFrame() {
+    framePending = false
+    if (isFinishing || camera != Camera.NAV || map.width == 0 || map.height == 0) return
+    val now = SystemClock.elapsedRealtime()
+    if (lastFrameAt != 0L && now - lastFrameAt < FRAME_MIN_MS) {
+      requestNavFrame() // at most ~30 redraws a second
+      return
+    }
+    val dt = if (lastFrameAt == 0L) FRAME_MIN_MS / 1000f else ((now - lastFrameAt) / 1000f).coerceAtMost(0.5f)
+    lastFrameAt = now
+    val target = compass.heading() ?: bearing.takeIf { hasBearing }
+    var turning = false
+    if (target != null) {
+      if (!headingInit) {
+        shownHeading = target
+        headingInit = true
+      } else {
+        val d = ((target - shownHeading + 540f) % 360f) - 180f
+        if (abs(d) > HEADING_SETTLED_DEG) {
+          shownHeading = (shownHeading + d * (1f - exp(-dt / HEADING_TAU_S)) + 360f) % 360f
+          turning = true
+        } else shownHeading = target
+      }
+    }
+    val gliding = navGlideMs > 0L && now < navGlideStart + navGlideMs
+    val arrow = navArrow
+    if (!followPaused) {
+      val pos = navPosition(now)
+      if (pos != null) {
+        upBearing = shownHeading
+        map.mapOrientation = -shownHeading
+        map.controller.setCenter(headingUpCentre(pos, NAV_DOWN, shownHeading))
+        arrow?.position = pos
+        arrow?.rotation = 0f
+        if (gliding) drawPair()
+      }
+    } else {
+      // The map is held where it was dragged, turned as it was; the arrow shows which way the phone points on it.
+      arrow?.rotation = -map.mapOrientation - shownHeading
+    }
+    map.invalidate()
+    if (gliding || turning) requestNavFrame() else lastFrameAt = 0L
   }
 
   private var centredOnce = false
@@ -1100,11 +1220,6 @@ class MainActivity :
     return c
   }
 
-  /**
-   * Line-leader pair (Alex, 21 Oct 2026): a line from this phone to the other leader of its team, grey, CYAN when they
-   * are PAIR_M ± PAIR_TOL_M apart (the 20 m strip). The partner comes from the server's status ([MessageFollo.pair]);
-   * its position is the teammate location the server already sends. No partner, or no fix for either, = no line.
-   */
   /** Index just above the search area and the walking track (the bottom map layers). */
   private fun aboveAreaAndTrack(): Int =
       map.overlays.indexOfLast { (it is Polygon && it.id == AREA_ID) || (it is Polyline && it.id == TRACK_ID) } + 1
@@ -1134,22 +1249,57 @@ class MainActivity :
     map.invalidate()
   }
 
+  /** This phone's team's line leaders from the server (21 Oct 2026); the map shows only these people. */
+  private fun leaders(): List<org.owntracks.android.model.messages.FolloLeader> =
+      viewModel.folloStatus.value?.message?.leaders.orEmpty().filter { !it.topic.isNullOrBlank() }
+
+  private fun leaderTopics(): Set<String> = leaders().filter { !it.isSelf }.mapNotNull { it.topic }.toSet()
+
+  private fun showIfLeader(contact: Contact) {
+    if (contact.id in leaderTopics()) updateContactMarker(contact)
+  }
+
+  /** Markers for the team's leaders only; anyone else (other teammates, other teams) is taken off the map. */
+  private fun syncContactMarkers() {
+    if (!::map.isInitialized) return
+    val keep = leaderTopics()
+    val removed =
+        map.overlays.removeAll { it is Marker && it.id.startsWith(CONTACT_PREFIX) && it.id.removePrefix(CONTACT_PREFIX) !in keep }
+    viewModel.allContacts.values.filter { it.id in keep }.forEach(::updateContactMarker)
+    if (removed) map.invalidate()
+  }
+
+  /** Where this phone is drawn: the arrow while it is on the map (NAV), else the latest fix. */
+  private fun ownDrawnPosition(): GeoPoint? =
+      navArrow?.position?.takeIf { navOn && it.latitude != 0.0 }
+          ?: viewModel.currentLocation.value?.let { GeoPoint(it.latitude, it.longitude) }
+
+  private var pairLabelText: String? = null
+
+  /**
+   * The line between the team's two line leaders (Alex, 21 Oct 2026), seen by everyone in the team: light grey, CYAN
+   * when they are PAIR_M ± PAIR_TOL_M apart (the 20 m strip), distance at its middle. A leader's own end is its arrow.
+   * Not exactly two leaders, or no position for one of them, = no line.
+   */
   private fun drawPair() {
     if (!::map.isInitialized) return
-    val topic = viewModel.folloStatus.value?.message?.pair?.topic
-    val me = viewModel.currentLocation.value
-    val other = topic?.let { viewModel.allContacts[it]?.latLng }
+    val two = leaders().takeIf { it.size == 2 }
+    val ends =
+        two?.map { ld -> if (ld.isSelf) ownDrawnPosition() else viewModel.allContacts[ld.topic!!]?.latLng?.let { GeoPoint(it.latitude.value, it.longitude.value) } }
+    val me = ends?.getOrNull(0)
+    val other = ends?.getOrNull(1)
     val line = map.overlays.firstOrNull { it is Polyline && it.id == PAIR_ID } as Polyline?
     val label = map.overlays.firstOrNull { it is Marker && it.id == PAIR_ID + LABEL_SUFFIX } as Marker?
     if (me == null || other == null) {
       if (line != null || label != null) {
         map.overlays.removeAll { (it is Polyline && it.id == PAIR_ID) || (it is Marker && it.id == PAIR_ID + LABEL_SUFFIX) }
+        pairLabelText = null
         map.invalidate()
       }
       return
     }
-    val a = GeoPoint(me.latitude, me.longitude)
-    val b = GeoPoint(other.latitude.value, other.longitude.value)
+    val a = me
+    val b = other
     val d = a.distanceToAsDouble(b)
     val ok = kotlin.math.abs(d - PAIR_M) <= PAIR_TOL_M
     val colour = if (ok) Color.rgb(0, 229, 255) else Color.rgb(154, 163, 160)
@@ -1173,8 +1323,13 @@ class MainActivity :
               setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
             }.also { map.overlays.add(it) }
     m.position = GeoPoint((a.latitude + b.latitude) / 2, (a.longitude + b.longitude) / 2)
-    m.setTextLabelBackgroundColor(if (ok) Color.argb(220, 0, 140, 160) else Color.argb(184, 0, 0, 0))
-    m.setTextIcon(String.format(java.util.Locale.ROOT, "%.1f m", d))
+    // A new label bitmap only when the text or colour changes (this runs every frame while the arrow glides).
+    val text = String.format(java.util.Locale.ROOT, "%.1f m", d)
+    if (label == null || pairLabelText != text + ok) {
+      pairLabelText = text + ok
+      m.setTextLabelBackgroundColor(if (ok) Color.argb(220, 0, 140, 160) else Color.argb(184, 0, 0, 0))
+      m.setTextIcon(text)
+    }
     map.invalidate()
   }
 
@@ -1197,6 +1352,7 @@ class MainActivity :
     lifecycleScope.launch {
       val bitmap = contactImageBindingAdapter.getBitmapFromCache(contact)
       val id = CONTACT_PREFIX + contact.id
+      if (contact.id !in leaderTopics()) return@launch // the status changed while the picture loaded
       val existing = map.overlays.firstOrNull { it is Marker && it.id == id } as Marker?
       if (existing != null) {
         // Every reply repeats the teammates (5 s in Move): touch the marker only when it really moved or
@@ -1232,7 +1388,7 @@ class MainActivity :
     private const val PAIR_ID = "follo-pair"
     private const val TRACK_ID = "follo-track"
     private const val PAIR_M = 20.0
-    private const val PAIR_TOL_M = 0.5
+    private const val PAIR_TOL_M = 1.0
     private const val NO_SIGNAL_AFTER_MS = 10_000L
     /** Radius of the invisible circle, as a fraction of the visible map's shorter side. */
     private const val LEASH_FRACTION = 0.25f
@@ -1245,6 +1401,12 @@ class MainActivity :
     /** Where the dot / arrow sits, as a fraction of the way down the visible map. */
     private const val HEADING_DOWN = 0.75f
     private const val NAV_DOWN = 0.80f
+    /** The map's turn eases toward the compass with this time constant (seconds). */
+    private const val HEADING_TAU_S = 0.25f
+    /** Closer than this to the compass = done turning (no more redraws). */
+    private const val HEADING_SETTLED_DEG = 0.3f
+    /** ≤ 30 camera redraws a second. */
+    private const val FRAME_MIN_MS = 33L
     private const val START_ZOOM = 18.5
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"

@@ -46,8 +46,13 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * line where sharing starts and stops, and is what the map draws.
    */
   var poly: List<List<Double>>? = null
-  /** The other line leader of this phone's team, when it has exactly two: the map draws the line between them. */
+  /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
+  /**
+   * This phone's own team's line leaders (FOLLO server 21 Oct 2026). The map shows only these people (besides the
+   * phone itself), and when there are exactly two it draws the line between them, for every member of the team.
+   */
+  var leaders: List<FolloLeader>? = null
 
   /** [poly] as (lat, lon) points, or null if absent or malformed. */
   fun polyPoints(): List<Pair<Double, Double>>? =
@@ -69,4 +74,12 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
 class FolloPair {
   var tid: String? = null
   var topic: String? = null
+}
+
+/** One of the team's line leaders: tracker ID, location topic (= contact id), and whether it is this phone. */
+@Serializable
+class FolloLeader {
+  var tid: String? = null
+  var topic: String? = null
+  @SerialName("self") var isSelf: Boolean = false
 }

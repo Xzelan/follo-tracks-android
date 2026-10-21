@@ -51,4 +51,27 @@ class MessageFolloTest {
     assertEquals(1792421940L, follo.ends)
     assertEquals(null, MessageFollo().apply { box = "1,2,3" }.boxBounds())
   }
+
+  @Test
+  fun `team leaders are parsed, own entry marked`() {
+    val reply =
+        """[{"_type":"follo","state":"sharing","leaders":[{"tid":"L","topic":"owntracks/samsungapp/phone","self":true},
+           {"tid":"R","topic":"owntracks/follo-r/phone"}],"pair":{"tid":"R","topic":"owntracks/follo-r/phone"}}]"""
+    val follo = parser.fromJson(reply.byteInputStream()).filterIsInstance<MessageFollo>().single()
+    val leaders = follo.leaders!!
+    assertEquals(2, leaders.size)
+    assertEquals("owntracks/samsungapp/phone", leaders[0].topic)
+    assertTrue(leaders[0].isSelf)
+    assertEquals("R", leaders[1].tid)
+    assertEquals(false, leaders[1].isSelf)
+    val back = parser.fromJson(parser.toJson(follo)!!) as MessageFollo
+    assertEquals(2, back.leaders!!.size)
+    assertTrue(back.leaders!![0].isSelf)
+  }
+
+  @Test
+  fun `a reply without leaders leaves them empty`() {
+    val follo = parser.fromJson("""[{"_type":"follo","state":"outside"}]""".byteInputStream()).filterIsInstance<MessageFollo>().single()
+    assertEquals(null, follo.leaders)
+  }
 }
