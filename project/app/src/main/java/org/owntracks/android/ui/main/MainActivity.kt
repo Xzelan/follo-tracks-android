@@ -231,6 +231,7 @@ class MainActivity :
     if (camera == Camera.NAV) setNavLook(true)
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
+    binding.banner.setOnClickListener { recentre() } // top or bottom, either one brings the arrow back (Alex 24 Oct 2026)
     // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
     binding.card.setOnLongClickListener {
       if (requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
@@ -773,11 +774,21 @@ class MainActivity :
     // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
     // tapped. A pinch (any second finger during the touch) keeps following and keeps its zoom; the decision
     // is made when the fingers lift, so a pinch that starts one-fingered does not pause (review 21 Oct 2026).
+    // A two-finger twist (Alex 24 Oct 2026: "rotate the map using 2 fingers, just like Google Maps") turns the
+    // map once it passes ROTATE_START_DEG, so a pinch is not turned by accident, and holds it turned like a drag
+    // does. It turns about the fingers: osmdroid's pinch keeps the point under them fixed whatever the turn.
     // While any finger is down the camera leaves the map alone.
     var downX = 0f
     var downY = 0f
     var dragged = false
     var twoFingers = false
+    var lastAngle = 0f
+    var twist = 0f
+    var rotating = false
+    var rotated = false
+    var rebase = false
+    fun fingerAngle(e: android.view.MotionEvent) =
+        Math.toDegrees(kotlin.math.atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat()
     val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
     map.setOnTouchListener { _, e ->
       when (e.actionMasked) {
@@ -786,15 +797,43 @@ class MainActivity :
           downY = e.y
           dragged = false
           twoFingers = false
+          rotating = false
+          rotated = false
+          twist = 0f
           gestureActive = true
         }
-        android.view.MotionEvent.ACTION_POINTER_DOWN -> twoFingers = true
+        android.view.MotionEvent.ACTION_POINTER_DOWN -> {
+          twoFingers = true
+          rebase = true
+        }
+        // the finger pair changes: measure the twist afresh from the next move
+        android.view.MotionEvent.ACTION_POINTER_UP -> rebase = true
         android.view.MotionEvent.ACTION_MOVE ->
-            if (e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) > slop) dragged = true
+            if (e.pointerCount == 1) {
+              if (hypot(e.x - downX, e.y - downY) > slop) dragged = true
+            } else {
+              val a = fingerAngle(e)
+              if (rebase) {
+                lastAngle = a
+                rebase = false
+              }
+              val d = ((a - lastAngle + 540f) % 360f) - 180f
+              lastAngle = a
+              if (rotating) {
+                map.mapOrientation = (map.mapOrientation + d + 360f) % 360f
+                requestNavFrame() // the held arrow keeps pointing the way the phone faces
+              } else {
+                twist += d
+                if (abs(twist) > ROTATE_START_DEG) {
+                  rotating = true
+                  rotated = true
+                }
+              }
+            }
         android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
           gestureActive = false
-          if (dragged && !twoFingers) followPaused = true
-          if (camera == Camera.NAV && !followPaused) requestNavFrame() // arrow back on its spot at the new zoom
+          if ((dragged && !twoFingers) || rotated) followPaused = true
+          if (camera == Camera.NAV) requestNavFrame() // arrow back on its spot at the new zoom, or turned on the held map
         }
       }
       false
@@ -1145,7 +1184,7 @@ class MainActivity :
   }
 
   private var centredOnce = false
-  /** True once the volunteer drags the map themselves; tapping the card brings following back. */
+  /** True once the volunteer drags or turns the map themselves; tapping the card or banner brings following back. */
   private var followPaused = false
   /** True while a finger is on the map: the camera does not move it under the finger. */
   private var gestureActive = false
@@ -1183,9 +1222,10 @@ class MainActivity :
     map.controller.animateTo(c, null, PAN_MS)
   }
 
-  /** Card tap: follow again and bring the dot back to the middle. */
+  /** Card or banner tap: follow again, heading-up, with the arrow back on its spot. */
   private fun recentre() {
     followPaused = false
+    if (camera == Camera.NAV) requestNavFrame() // the compass turns the map back even before the next fix
     val l = viewModel.currentLocation.value ?: return
     if (!::map.isInitialized || map.width == 0) return
     // Forget the last accepted fix, so the current style places the dot afresh (heading-up styles
@@ -1512,6 +1552,8 @@ class MainActivity :
     private const val HEADING_TAU_S = 0.25f
     /** Closer than this to the compass = done turning (no more redraws). */
     private const val HEADING_SETTLED_DEG = 0.3f
+    /** A two-finger twist turns the map only past this, so pinching to zoom never turns it by accident. */
+    private const val ROTATE_START_DEG = 12f
     /** ≤ 30 camera redraws a second. */
     private const val FRAME_MIN_MS = 33L
     private const val START_ZOOM = 18.5
