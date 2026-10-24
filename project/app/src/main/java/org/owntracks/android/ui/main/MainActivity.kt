@@ -547,6 +547,18 @@ class MainActivity :
     )
   }
 
+  // Battery screens differ: Samsung has an Unrestricted choice per app; stock Android 14+ hides Unrestricted behind
+  // the words of the "Allow background usage" row (its switch alone = Optimised); older stock Android has a
+  // Don't optimise dialog in the full list.
+  private fun batteryText(samsung: Int, android14: Int, older: Int) =
+      getString(
+          when {
+            Build.MANUFACTURER.equals("samsung", ignoreCase = true) -> samsung
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> android14
+            else -> older
+          }
+      )
+
   private fun isIgnoringBatteryOptimizations(): Boolean =
       (getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(
           packageName
@@ -568,7 +580,16 @@ class MainActivity :
           if (preferences.userDeclinedEnableNotificationPermissions) openAppSettings()
           else notificationPermissionRequester.requestNotificationPermission()
       Kind.NEED_BATTERY -> {
-        Toast.makeText(this, R.string.follo_battery_howto, Toast.LENGTH_LONG).show()
+        Toast.makeText(
+                this,
+                batteryText(
+                    R.string.follo_battery_howto_samsung,
+                    R.string.follo_battery_howto_14,
+                    R.string.follo_battery_howto,
+                ),
+                Toast.LENGTH_LONG,
+            )
+            .show()
         settingsLauncher.launch(BatteryOptimizingIntents(this).settingsIntent)
       }
       else -> {}
@@ -595,7 +616,9 @@ class MainActivity :
     // Notifications off is not red: the location service runs without them, its notification is just hidden
     // (review 21 Oct 2026). The card carries a one-line note instead; the setup chain still asks once.
     if (!isIgnoringBatteryOptimizations())
-        return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title), s(R.string.follo_battery_sub), s(R.string.follo_battery_btn))
+        return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title),
+            batteryText(R.string.follo_battery_sub_samsung, R.string.follo_battery_sub_14, R.string.follo_battery_sub),
+            s(R.string.follo_battery_btn))
     val server =
         viewModel.folloStatus.value
             ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }

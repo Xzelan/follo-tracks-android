@@ -31,9 +31,15 @@
     <string name="follo_bg_btn">Set location to Always</string>
     <string name="follo_notif_sub">Android needs a notification to keep tracking running</string>
     <string name="follo_notif_btn">Allow notifications</string>
-    <string name="follo_battery_sub">Battery saving may stop tracking when the screen is off</string>
+    <!-- 24 Oct 2026: the steps live in the banner (a toast vanishes behind Settings). Tyrone, Android 14+ stock: the
+         "Allow background usage" SWITCH on = Optimised, which doesn't count; Unrestricted is behind the row's words. -->
+    <string name="follo_battery_sub">Battery saving may stop tracking when the screen is off. Tap Allow battery use, show All apps, tap FOLLO Tracks and choose Don\'t optimise</string>
+    <string name="follo_battery_sub_samsung">Battery saving may stop tracking when the screen is off. Tap Allow battery use, tap FOLLO Tracks and choose Unrestricted</string>
+    <string name="follo_battery_sub_14">Battery saving may stop tracking when the screen is off. Tap Allow battery use, tap FOLLO Tracks, tap the words Allow background usage (not the switch) and choose Unrestricted</string>
     <string name="follo_battery_btn">Allow battery use</string>
-    <string name="follo_battery_howto">Find FOLLO Tracks in the list and choose Don\'t optimise (Samsung: Unrestricted).</string>
+    <string name="follo_battery_howto">Find FOLLO Tracks in the list and choose Don\'t optimise</string>
+    <string name="follo_battery_howto_samsung">Tap FOLLO Tracks, then choose Unrestricted</string>
+    <string name="follo_battery_howto_14">FOLLO Tracks › the words Allow background usage › Unrestricted</string>
 
     <string name="follo_who">%1$s · tracker %2$s</string>
     <string name="follo_tracker">Tracker %1$s</string>
