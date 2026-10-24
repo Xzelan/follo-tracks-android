@@ -619,8 +619,10 @@ constructor(
       message.name?.takeIf { it.isNotBlank() && it != preferences.displayName }?.let {
         preferences.displayName = it
       }
-      message.tile?.takeIf { it.startsWith("https://") && it != preferences.mapTileUrl }?.let {
-        preferences.mapTileUrl = it
+      message.tile?.takeIf { it.startsWith("https://") }?.let {
+        val maxZoom = (message.tilez ?: 20).coerceIn(1, 22)
+        if (maxZoom != preferences.mapTileMaxZoom) preferences.mapTileMaxZoom = maxZoom
+        if (it != preferences.mapTileUrl) preferences.mapTileUrl = it
       }
       messageReceivedIdlingResource.remove(message)
     }

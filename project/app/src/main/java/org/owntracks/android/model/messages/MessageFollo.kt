@@ -36,6 +36,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   /** XYZ tile URL template for the map; applied when it changes. */
   var tile: String? = null
   /**
+   * The deepest zoom [tile] has tiles for (server 24 Oct 2026): LIST stops at 19 and answers deeper requests with a
+   * blank tile, so the map enlarges this level instead. Absent ⇒ 20, as before.
+   */
+  var tilez: Int? = null
+  /**
    * The search area's storage box "minlat,minlon,maxlat,maxlon" while a window is open for this
    * phone: drawn on the map, and used by the phone itself to go green/grey at the edge even when
    * it has no signal. Null when no window is open.

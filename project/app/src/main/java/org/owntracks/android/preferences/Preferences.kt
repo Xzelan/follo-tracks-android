@@ -276,6 +276,9 @@ constructor(
   // FOLLO: XYZ tile URL template for the one map; set by the server, never by the user.
   @Preference(exportModeMqtt = false) var mapTileUrl: String by preferencesStore
 
+  // FOLLO: the deepest zoom [mapTileUrl] has tiles for (server's `tilez`); the map enlarges that level beyond it.
+  @Preference(exportModeMqtt = false) var mapTileMaxZoom: Int by preferencesStore
+
   // Maximum plausible ground speed in km/h between consecutive published fixes. 0 disables the
   // implausible-speed (teleport) filter.
   @Preference var maxImplausibleSpeedKmh: Int by preferencesStore

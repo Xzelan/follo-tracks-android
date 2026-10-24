@@ -316,9 +316,9 @@ class MainActivity :
         launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
-          viewModel.tileUrlState.collect {
-            if (::map.isInitialized) {
-              map.setTileSource(FolloTileSource.of(it))
+          viewModel.tileState.collect { (url, maxZoom) ->
+            if (::map.isInitialized && (map.tileProvider.tileSource as? FolloTileSource)?.matches(url, maxZoom) != true) {
+              map.setTileSource(FolloTileSource.of(url, maxZoom))
               map.invalidate()
             }
           }
@@ -765,7 +765,9 @@ class MainActivity :
       osmdroidTileCache = noBackupFilesDir.resolve("osmdroid/tiles")
     }
     map = binding.map
-    map.setTileSource(FolloTileSource.of(viewModel.tileUrl))
+    viewModel.tileState.value.let { (url, maxZoom) ->
+      map.setTileProvider(FolloTileProvider(this, FolloTileSource.of(url, maxZoom))) // enlarges past the imagery's depth
+    }
     map.overlayManager.tilesOverlay = ShiftedTilesOverlay(map.tileProvider, this) // Esri sits 1.5 m north
     map.setMultiTouchControls(true)
     // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
@@ -811,7 +813,7 @@ class MainActivity :
     map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
-    map.maxZoomLevel = 20.0
+    map.maxZoomLevel = MAP_MAX_ZOOM.toDouble()
     map.controller.setZoom(START_ZOOM) // walking scale; the NAV look zooms out to make up for its tilt
     map.controller.setCenter(GeoPoint(-41.1, 146.83)) // until the first fix arrives
 

@@ -84,7 +84,8 @@ constructor(
   }
 
   val monitoring = MutableStateFlow(preferences.monitoring)
-  val tileUrlState = MutableStateFlow(preferences.mapTileUrl)
+  /** The map's imagery: tile URL template and the deepest zoom it has tiles for. */
+  val tileState = MutableStateFlow(preferences.mapTileUrl to preferences.mapTileMaxZoom)
   val displayNameState = MutableStateFlow(preferences.displayName)
 
   /** Last status element from the server; null until the phone has posted once. */
@@ -125,8 +126,6 @@ constructor(
   val displayName: String
     get() = preferences.displayName
 
-  val tileUrl: String
-    get() = preferences.mapTileUrl
 
   private val preferenceChangeListener =
       object : Preferences.OnPreferenceChangeListener {
@@ -134,7 +133,8 @@ constructor(
           if (Preferences::monitoring.name in properties) monitoring.value = preferences.monitoring
           if (Preferences::setupCompleted.name in properties)
               setupCompleted.value = preferences.setupCompleted
-          if (Preferences::mapTileUrl.name in properties) tileUrlState.value = preferences.mapTileUrl
+          if (Preferences::mapTileUrl.name in properties || Preferences::mapTileMaxZoom.name in properties)
+              tileState.value = preferences.mapTileUrl to preferences.mapTileMaxZoom
           if (Preferences::displayName.name in properties)
               displayNameState.value = preferences.displayName
         }
