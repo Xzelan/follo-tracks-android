@@ -494,7 +494,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
             .setContentTitle(notificationTitle)
             .setContentText(notificationText)
             .setAutoCancel(true)
-            .setSmallIcon(R.drawable.ic_owntracks_80)
+            .setSmallIcon(R.drawable.ic_follo_notif)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notificationText))
             .setContentIntent(
                 PendingIntent.getActivity(
@@ -572,7 +572,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         .setColor(getColor(R.color.OTPrimaryBlue))
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        .setSmallIcon(R.drawable.ic_owntracks_80)
+        .setSmallIcon(R.drawable.ic_follo_notif)
         .setLocalOnly(true)
         .setDefaults(Notification.DEFAULT_ALL)
         .setNumber(activeNotifications.size)

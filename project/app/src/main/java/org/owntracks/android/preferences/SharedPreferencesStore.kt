@@ -62,10 +62,10 @@ constructor(
               context.getString(R.string.certificateMigrationRequiredNotificationTitle),
           )
           .setAutoCancel(true)
-          .setSmallIcon(R.drawable.ic_owntracks_80)
+          .setSmallIcon(R.drawable.ic_follo_notif)
           .setPriority(NotificationCompat.PRIORITY_DEFAULT)
           .addAction(
-              R.drawable.ic_owntracks_80,
+              R.drawable.ic_follo_notif,
               context.getString(R.string.certificateMigrationRequiredOpenSettingsAction),
               PendingIntent.getActivity(
                   context,

@@ -40,7 +40,7 @@ class FolloDiagTest {
     val message = parser.fromJson("""{"_type":"location","lat":-26.63,"lon":153.03,"tst":1792576065,"tid":"IP"}""")
     assertTrue(message is MessageLocation)
     assertNull((message as MessageLocation).fd)
-    assertFalse(parser.toJsonPlain(message).contains("fd"))
+    assertFalse(parser.toJsonPlain(message).contains("\"fd\""))   // the key, not the letters: the random message id can contain "fd"
     val withFd = parser.fromJson("""{"_type":"location","lat":1,"lon":2,"tst":3,"tid":"IP","fd":{"fg":1,"au":"inuse","src":"user"}}""") as MessageLocation
     assertEquals("inuse", withFd.fd?.au)
   }

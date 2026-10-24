@@ -154,7 +154,7 @@ constructor(
             .setContentTitle(context.getString(R.string.geocoderProblemNotificationTitle))
             .setContentText(errorNotificationText)
             .setAutoCancel(true)
-            .setSmallIcon(R.drawable.ic_owntracks_80)
+            .setSmallIcon(R.drawable.ic_follo_notif)
             .setStyle(NotificationCompat.BigTextStyle().bigText(errorNotificationText))
             .setContentIntent(
                 PendingIntent.getActivity(
