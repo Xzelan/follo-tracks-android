@@ -61,7 +61,8 @@ class Contact(id: String) : BaseObservable() {
       Timber.v("Contact ${this.id} has moved to $latLng")
       latLng = messageLocation.toLatLng()
     }
-    trackerId = messageLocation.trackerId?.take(2) ?: messageLocation.topic.takeLast(2)
+    // FOLLO tids are 3 characters since 24 Oct 2026 (JE1 = first JE to register); upstream kept only 2
+    trackerId = messageLocation.trackerId?.take(3) ?: messageLocation.topic.takeLast(2)
     locationAccuracy = messageLocation.accuracy
     altitude = messageLocation.altitude
     velocity = messageLocation.velocity

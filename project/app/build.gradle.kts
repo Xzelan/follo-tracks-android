@@ -15,7 +15,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.11"
+val versionNameValue = "0.1.12"
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code was never uploaded
 val versionBuild = 1
 

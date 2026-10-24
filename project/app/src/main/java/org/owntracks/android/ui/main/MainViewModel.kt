@@ -120,7 +120,7 @@ constructor(
     get() = deviceMetricsProvider.batteryLevel
 
   val trackerId: String
-    get() = preferences.tid.toString()
+    get() = folloStatus.value?.message?.tid?.takeIf { it.isNotBlank() } ?: preferences.tid.toString()
 
   val displayName: String
     get() = preferences.displayName

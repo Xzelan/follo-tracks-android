@@ -23,6 +23,14 @@ class MessageFolloTest {
   }
 
   @Test
+  fun `roster tracker ID of three characters is kept whole`() {
+    val follo =
+        parser.fromJson("""[{"_type":"follo","state":"outside","name":"Jon","tid":"JE1"}]""".byteInputStream())
+            .filterIsInstance<MessageFollo>().single()
+    assertEquals("JE1", follo.tid)
+  }
+
+  @Test
   fun `show and leaders name teammates by topic, self excluded by the app`() {
     val reply =
         """[{"_type":"follo","state":"outside","team":"Test",

@@ -85,6 +85,10 @@ class TextDrawable private constructor(builder: Builder) : ShapeDrawable(builder
     val height = if (height < 0) r.height() else height
     val fontSize = if (fontSize < 0) min(width, height) / 2 else fontSize
     textPaint.textSize = fontSize.toFloat()
+    // FOLLO: 3-character tids (MW1) shrink to fit inside the round face
+    val room = width * 0.8f
+    val textWidth = textPaint.measureText(text)
+    if (textWidth > room) textPaint.textSize = fontSize * room / textWidth
     canvas.drawText(
         text,
         (width / 2).toFloat(),

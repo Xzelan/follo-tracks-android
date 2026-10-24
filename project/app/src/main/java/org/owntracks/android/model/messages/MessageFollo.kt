@@ -31,6 +31,8 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   var line: String? = null
   /** Volunteer's name as the roster has it, for the card. */
   var name: String? = null
+  /** Volunteer's tracker ID as the roster has it (3 characters since 24 Oct 2026, e.g. JE1); the phone's own is only 2. */
+  var tid: String? = null
   /** XYZ tile URL template for the map; applied when it changes. */
   var tile: String? = null
   /**
