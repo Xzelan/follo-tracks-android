@@ -679,15 +679,18 @@ class MainActivity :
     )
   }
 
-  // Battery screens differ: Samsung has an Unrestricted choice per app; stock Android 14+ hides Unrestricted behind
-  // the words of the "Allow background usage" row (its switch alone = Optimised); older stock Android has a
-  // Don't optimise dialog in the full list.
-  private fun batteryText(samsung: Int, android14: Int, older: Int) =
+  // Battery screens differ. Android 12+ opens FOLLO Tracks' own App info page, where the app is always the one shown
+  // (the system battery list hides it behind a filter on some phones: Paul, 26 Oct 2026). From there Samsung has
+  // Battery (below the fold) › Unrestricted; stock Android 14+ hides Unrestricted behind the words of the "Allow
+  // background usage" row (its switch alone = Optimised); 12-13 and other makers have Battery or App battery usage
+  // › Unrestricted. Android 11 and older keep the full list with its Don't optimise dialog.
+  private fun batteryText(samsung: Int, android14: Int, android12: Int, older: Int) =
       getString(
           when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S -> older
             Build.MANUFACTURER.equals("samsung", ignoreCase = true) -> samsung
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> android14
-            else -> older
+            else -> android12
           }
       )
 
@@ -717,12 +720,14 @@ class MainActivity :
                 batteryText(
                     R.string.follo_battery_howto_samsung,
                     R.string.follo_battery_howto_14,
+                    R.string.follo_battery_howto_12,
                     R.string.follo_battery_howto,
                 ),
                 Toast.LENGTH_LONG,
             )
             .show()
-        settingsLauncher.launch(BatteryOptimizingIntents(this).settingsIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) openAppSettings()
+        else settingsLauncher.launch(BatteryOptimizingIntents(this).settingsIntent)
       }
       else -> {}
     }
@@ -749,7 +754,7 @@ class MainActivity :
     // (review 21 Oct 2026). The card carries a one-line note instead; the setup chain still asks once.
     if (!isIgnoringBatteryOptimizations())
         return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title),
-            batteryText(R.string.follo_battery_sub_samsung, R.string.follo_battery_sub_14, R.string.follo_battery_sub),
+            batteryText(R.string.follo_battery_sub_samsung, R.string.follo_battery_sub_14, R.string.follo_battery_sub_12, R.string.follo_battery_sub),
             s(R.string.follo_battery_btn))
     val server =
         viewModel.folloStatus.value
