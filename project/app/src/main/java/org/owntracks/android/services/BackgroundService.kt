@@ -154,6 +154,10 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   // Significant motion sensor for triggering location requests when device movement is detected
   private lateinit var significantMotionSensor: SignificantMotionSensor
 
+  // FOLLO: whether setupAndStartService has run in this instance. A wake-circle crossing can now
+  // start the service from nothing (after it was closed), and that start must arm the sender too.
+  private var serviceSetUp = false
+
   @EntryPoint
   @InstallIn(SingletonComponent::class)
   internal interface ServiceEntrypoint {
@@ -274,6 +278,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     Timber.v("Backgroundservice onStartCommand intent=$intent")
     super.onStartCommand(intent, flags, startId)
     handleIntent(intent)
+    if (!serviceSetUp) setupAndStartService()
     startForegroundService()
     return START_STICKY
   }
@@ -299,6 +304,19 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
    * process can do before it dies will survive that.
    */
   override fun onTaskRemoved(rootIntent: Intent?) {
+    // FOLLO: standing by (outside a search area), swiping the app away closes it, as on iOS. The
+    // wake circles stay registered with Play services, and crossing one starts the service again.
+    if (
+        preferences.monitoring == MonitoringMode.Manual ||
+            preferences.monitoring == MonitoringMode.Quiet
+    ) {
+      Timber.i("Task removed while standing by, closing")
+      stopForeground(STOP_FOREGROUND_REMOVE)
+      folloDiagRepo.foregroundServiceRunning = false
+      stopSelf()
+      super.onTaskRemoved(rootIntent)
+      return
+    }
     Timber.i("Task removed, scheduling a service restart in $TASK_REMOVED_RESTART_DELAY")
     try {
       alarmManager.setAndAllowWhileIdle(
@@ -465,6 +483,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   private fun setupAndStartService() {
     Timber.v("setupAndStartService")
+    serviceSetUp = true
     startForegroundService()
     setupLocationRequest()
     scheduler.scheduleLocationPing()
@@ -657,6 +676,15 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     Timber.v("setupLocationRequest")
     if (requirementsChecker.hasLocationPermissions()) {
       val monitoring = preferences.monitoring
+      // FOLLO: standing by, the phone asks for no positions at all (as on iOS); only the wake
+      // circles, which Play services watches for us, can wake it.
+      if (monitoring == MonitoringMode.Manual || monitoring == MonitoringMode.Quiet) {
+        Timber.d("standing by: no location updates")
+        locationProviderClient.removeLocationUpdates(
+            callbackForReportType[MessageLocation.ReportType.DEFAULT]!!.value
+        )
+        return Result.success(Unit)
+      }
       var interval: Duration? = null
       var smallestDisplacement: Float? = null
       val priority: LocatorPriority

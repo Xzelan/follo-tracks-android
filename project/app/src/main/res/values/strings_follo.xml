@@ -21,7 +21,7 @@
     <string name="follo_ready_for">✓ Ready for %1$s</string>
     <string name="follo_ready_none">No search area loaded yet</string>
     <string name="follo_standby_nosearch_title">Standing by: no search right now</string>
-    <string name="follo_next_search">Next search: %1$s. </string>
+    <string name="follo_next_search">"Next search: %1$s. "</string>
     <string name="follo_nosearch_tail">FOLLO doesn\'t keep check-ins outside search hours</string>
     <string name="follo_until">%1$s, until %2$s</string>
 
