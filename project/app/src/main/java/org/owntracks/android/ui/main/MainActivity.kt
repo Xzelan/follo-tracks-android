@@ -236,14 +236,19 @@ class MainActivity :
     binding.card.setOnLongClickListener {
       if (requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
         Toast.makeText(this, R.string.follo_send_now, Toast.LENGTH_SHORT).show()
-        startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+        pendingCheckIn = true
+        checkInIfReady()
       }
       true
     }
 
     lifecycleScope.launch {
       repeatOnLifecycle(Lifecycle.State.STARTED) {
-        launch { redrawRegions(viewModel.waypoints()) }
+        launch {
+          val all = viewModel.waypoints()
+          redrawRegions(all)
+          refreshWakeAreas(all)
+        }
         launch {
           viewModel.waypointEvents.collect {
             when (it) {
@@ -256,6 +261,7 @@ class MainActivity :
               }
               is WaypointsRepo.WaypointOperation.InsertMany -> it.waypoints.forEach(::addRegion)
             }
+            refreshWakeAreas(viewModel.waypoints())
             map.invalidate()
           }
         }
@@ -309,6 +315,7 @@ class MainActivity :
             it?.let(viewModel::addTrack)
             it?.let(compass::updateDeclination)
             it?.let(::followCamera)
+            checkInIfReady()
             drawPair()
             render()
           }
@@ -395,8 +402,110 @@ class MainActivity :
       myLocationOverlay?.enableMyLocation()
     }
     if (preferences.setupCompleted) runPermissionChain()
+    // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
+    // circles for any search in the next 14 days. Sent once the screen has a fix better than 100 m.
+    if (preferences.setupCompleted && requirementsChecker.hasLocationPermissions()) {
+      pendingCheckIn = true
+      checkInIfReady()
+    }
     render()
   }
+
+  /** A check-in (open or long-press) waiting for a usable fix; the app's own 100 m filter would drop a worse one. */
+  private var pendingCheckIn = false
+
+  private fun checkInIfReady() {
+    if (!pendingCheckIn) return
+    val l = viewModel.currentLocation.value ?: return
+    if (l.accuracy >= CHECK_IN_MAX_ACC_M || System.currentTimeMillis() - l.time > CHECK_IN_MAX_AGE_MS) return
+    pendingCheckIn = false
+    startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+  }
+
+  /** The searches whose wake-up circles this phone holds ("FOLLO MV wake 3" -> MV), for "Ready for MV" (Alex 25 Oct 2026). */
+  private var wakeAreas: List<String> = emptyList()
+
+  private fun wakeAreaOf(w: WaypointModel): String? =
+      w.description.split(' ').takeIf { w.geofenceRadius > 0 && it.size >= 3 && it[0] == "FOLLO" && it[2] == "wake" }?.get(1)
+
+  private fun refreshWakeAreas(all: List<WaypointModel>) {
+    drawGeofences(all)
+    val areas = all.mapNotNull(::wakeAreaOf).distinct()
+    if (areas != wakeAreas) {
+      wakeAreas = areas
+      render()
+    }
+  }
+
+  private var geofenceKey = ""
+
+  /**
+   * The outline of every search area whose wake-up circles the phone holds (Alex 25 Oct 2026: from now until the
+   * circles are reclaimed, "it shows people where the geo-fences are and may be helpful for locals"). Each circle's edge
+   * is drawn where it is not inside another circle of the same area, so separate pieces stay separate. Same on iOS.
+   */
+  private fun drawGeofences(all: List<WaypointModel>) {
+    if (!::map.isInitialized) return
+    val circles = all.mapNotNull { w -> wakeAreaOf(w)?.let { a -> a to w } }
+    val key = circles.joinToString(";") { (a, w) -> "$a${w.geofenceLatitude.value},${w.geofenceLongitude.value},${w.geofenceRadius}" }
+    if (key == geofenceKey) return
+    geofenceKey = key
+    map.overlays.removeAll { it is Polyline && it.id == GEOFENCE_ID }
+    val lines = mutableListOf<Polyline>()
+    for ((_, group) in circles.groupBy({ it.first }, { it.second })) {
+      for (c in group) {
+        val lat = c.geofenceLatitude.value
+        val lon = c.geofenceLongitude.value
+        val r = c.geofenceRadius.toDouble()
+        val kx = 111320 * kotlin.math.cos(Math.toRadians(lat))
+        val ky = 110540.0
+        val n = (r / 8).toInt().coerceIn(72, 720)
+        val pts =
+            (0 until n).map { i ->
+              val t = i * 2 * Math.PI / n
+              val p = GeoPoint(lat + r * kotlin.math.sin(t) / ky, lon + r * kotlin.math.cos(t) / kx)
+              val covered =
+                  group.any { o ->
+                    o !== c &&
+                        kotlin.math.hypot((p.longitude - o.geofenceLongitude.value) * kx, (p.latitude - o.geofenceLatitude.value) * ky) <
+                            o.geofenceRadius - 0.5
+                  }
+              p to !covered
+            }
+        // runs of uncovered points; start just after a covered one so a run never wraps
+        val start = pts.indexOfFirst { !it.second }.let { if (it < 0) 0 else it + 1 }
+        var run = mutableListOf<GeoPoint>()
+        fun flush() {
+          if (run.size >= 2) lines += Polyline(map).apply {
+            id = GEOFENCE_ID
+            setPoints(run)
+            infoWindow = null
+            outlinePaint.color = getColor(R.color.follo_area)
+            outlinePaint.strokeWidth = resources.displayMetrics.density * 3
+          }
+          run = mutableListOf()
+        }
+        for (k in 0..n) {
+          val (p, show) = pts[(start + k) % n]
+          if (show) run.add(p) else flush()
+        }
+        flush()
+      }
+    }
+    val at = aboveAreaAndTrack()
+    lines.forEachIndexed { i, l -> map.overlays.add(at + i, l) }
+    keepOwnOnTop()
+    map.invalidate()
+  }
+
+  /** "✓ Ready for MV" / "No search area loaded yet", under Standing by; the same wording on iOS. */
+  private fun readyLine(): String =
+      "\n" +
+          when (wakeAreas.size) {
+            0 -> getString(R.string.follo_ready_none)
+            1 -> getString(R.string.follo_ready_for, wakeAreas[0])
+            else -> getString(R.string.follo_ready_for, wakeAreas.dropLast(1).joinToString(", ") + " and " + wakeAreas.last())
+          }
 
   override fun onPause() {
     compass.stop()
@@ -660,23 +769,23 @@ class MainActivity :
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_outside_title),
-              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub),
+              (server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub)) + readyLine(),
           )
       "nosearch" ->
           Banner(
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_nosearch_title),
-              server?.line?.takeIf { it.isNotBlank() }
+              (server?.line?.takeIf { it.isNotBlank() }
                   ?: ((server?.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
-                      s(R.string.follo_nosearch_tail)),
+                      s(R.string.follo_nosearch_tail))) + readyLine(),
           )
       else ->
           Banner(
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_title),
-              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub),
+              (server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub)) + readyLine(),
           )
     }
   }
@@ -1549,8 +1658,12 @@ class MainActivity :
   companion object {
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
+    private const val GEOFENCE_ID = "follo-geofence"
     private const val PAIR_ID = "follo-pair"
     private const val TRACK_ID = "follo-track"
+    // A check-in goes with a fix better than this (the app's own ignoreInaccurateLocations is 100) and no older than this
+    private const val CHECK_IN_MAX_ACC_M = 100f
+    private const val CHECK_IN_MAX_AGE_MS = 60_000L
     private const val PAIR_M = 20.0
     private const val PAIR_TOL_M = 1.0
     private const val NO_SIGNAL_AFTER_MS = 10_000L
