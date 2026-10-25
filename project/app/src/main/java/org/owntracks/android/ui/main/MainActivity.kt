@@ -438,6 +438,20 @@ class MainActivity :
   }
 
   private var geofenceKey = ""
+  private var drawnAreaPts: List<GeoPoint>? = null
+  private var lastWaypoints: List<WaypointModel> = emptyList()
+
+  private fun insideRing(ring: List<GeoPoint>, lat: Double, lon: Double): Boolean {
+    var c = false
+    var j = ring.size - 1
+    for (i in ring.indices) {
+      val (yi, xi) = ring[i].latitude to ring[i].longitude
+      val (yj, xj) = ring[j].latitude to ring[j].longitude
+      if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) c = !c
+      j = i
+    }
+    return c
+  }
 
   /**
    * The outline of every search area whose wake-up circles the phone holds (Alex 25 Oct 2026: from now until the
@@ -446,7 +460,15 @@ class MainActivity :
    */
   private fun drawGeofences(all: List<WaypointModel>) {
     if (!::map.isInitialized) return
-    val circles = all.mapNotNull { w -> wakeAreaOf(w)?.let { a -> a to w } }
+    lastWaypoints = all
+    // One line per area (Alex 25 Oct 2026): while a window's edge is drawn (drawAreaBox), skip the circles of that area
+    // (their centres fall inside it); the edge sits 2 m outside the circles, so both together showed a double line.
+    val edge = drawnAreaPts
+    val circles =
+        all.mapNotNull { w -> wakeAreaOf(w)?.let { a -> a to w } }.let { cs ->
+          val drawnAreas = cs.filter { (_, w) -> edge != null && insideRing(edge, w.geofenceLatitude.value, w.geofenceLongitude.value) }.map { it.first }.toSet()
+          cs.filter { it.first !in drawnAreas }
+        }
     val key = circles.joinToString(";") { (a, w) -> "$a${w.geofenceLatitude.value},${w.geofenceLongitude.value},${w.geofenceRadius}" }
     if (key == geofenceKey) return
     geofenceKey = key
@@ -1386,12 +1408,14 @@ class MainActivity :
     if (key == drawnBox) return // the same box arrives with every reply; redrawing it each time flickers
     drawnBox = key
     map.overlays.removeAll { (it is Polygon && it.id == AREA_ID) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
+    drawnAreaPts = null
     val b = status?.boxBounds()
     val ring = status?.polyPoints()
     if (status != null && (b != null || ring != null) && status.ends?.let { System.currentTimeMillis() / 1000 >= it } != true) {
       // The drawn boundary when the area has one (21 Oct 2026), else the box. Label at the top edge's middle.
       val pts = ring?.map { (la, lo) -> GeoPoint(la, lo) }?.let { it + it.first() }
           ?: listOf(GeoPoint(b!![2], b[1]), GeoPoint(b[2], b[3]), GeoPoint(b[0], b[3]), GeoPoint(b[0], b[1]), GeoPoint(b[2], b[1]))
+      drawnAreaPts = pts
       val n = pts.maxOf { it.latitude }
       val w = pts.minOf { it.longitude }
       val e = pts.maxOf { it.longitude }
@@ -1421,6 +1445,7 @@ class MainActivity :
     }
     keepOwnOnTop()
     map.invalidate()
+    drawGeofences(lastWaypoints)   // the area whose edge is now drawn (or no longer drawn) changes which outlines show
   }
 
   private fun insideBox(b: DoubleArray, lat: Double, lon: Double) =
