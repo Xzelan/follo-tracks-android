@@ -1310,6 +1310,7 @@ class MainActivity :
           },
       )
     }
+    keepOwnOnTop()
     map.invalidate()
   }
 
@@ -1330,6 +1331,20 @@ class MainActivity :
   }
 
   /** Index just above the search area and the walking track (the bottom map layers). */
+  /**
+   * Your own arrow (or dot) is always drawn last, so teammates, pins and labels never hide it (Alex 25 Oct 2026: "the
+   * arrow showing me where I am is always visible"). osmdroid draws overlays in list order; call after adding any.
+   */
+  private fun keepOwnOnTop() {
+    val own = (if (navOn) navArrow else myLocationOverlay) ?: return
+    val i = map.overlays.indexOf(own)
+    if (i < 0) return
+    // Only the screen-fixed scale bar and credit may sit above it
+    if (map.overlays.drop(i + 1).all { it is ScaleBarOverlay || it is CopyrightOverlay }) return
+    map.overlays.removeAt(i)
+    map.overlays.add(map.overlays.indexOfFirst { it is ScaleBarOverlay || it is CopyrightOverlay }.takeIf { it >= 0 } ?: map.overlays.size, own)
+  }
+
   private fun aboveAreaAndTrack(): Int =
       map.overlays.indexOfLast { (it is Polygon && it.id == AREA_ID) || (it is Polyline && it.id == TRACK_ID) } + 1
 
@@ -1467,7 +1482,7 @@ class MainActivity :
               setTextLabelForegroundColor(Color.WHITE)
               setTextLabelFontSize((12 * resources.displayMetrics.scaledDensity).roundToInt())
               setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            }.also { map.overlays.add(it) }
+            }.also { map.overlays.add(it); keepOwnOnTop() }
     m.position = GeoPoint((a.latitude + b.latitude) / 2, (a.longitude + b.longitude) / 2)
     // A new label bitmap only when the text or colour changes (this runs every frame while the arrow glides).
     val text = String.format(java.util.Locale.ROOT, "%.1f m", d)
@@ -1489,6 +1504,7 @@ class MainActivity :
       (it is Marker && it.id.startsWith(REGION_PREFIX)) || (it is Polygon && it.id.startsWith(REGION_PREFIX))
     }
     all.forEach(::addRegion)
+    keepOwnOnTop()
     map.invalidate()
   }
 
@@ -1524,6 +1540,7 @@ class MainActivity :
               infoWindow = null
             },
         )
+        keepOwnOnTop()
       }
       map.invalidate()
     }
