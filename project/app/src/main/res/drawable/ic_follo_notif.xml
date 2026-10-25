@@ -1,16 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FOLLO Tracks status-bar mark (24 Oct 2026): the folded map, Arthur River track and nav arrow of launcher icon 140, without the
-     wordmark (illegible at 24 dp) or contours. Replaces the old ring-and-dot. -->
+<!-- FOLLO Tracks status-bar mark (25 Oct 2026): the tracklog and north-pointing nav arrow of launcher icon 142, without the
+     wordmark or contours (illegible at 24 dp). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="300" android:viewportHeight="300">
-  <group android:translateX="-100" android:translateY="-170">
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="16" android:strokeLineJoin="round" android:pathData="M110.0,215.0 L203.3,195.0 L296.7,215.0 L390.0,195.0 L390.0,425.0 L296.7,445.0 L203.3,425.0 L110.0,445.0 Z"/>
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="12" android:pathData="M203.3,195.0 L203.3,425.0 M296.7,215.0 L296.7,445.0"/>
-    <group>
-      <clip-path android:pathData="M110.0,215.0 L203.3,195.0 L296.7,215.0 L390.0,195.0 L390.0,425.0 L296.7,445.0 L203.3,425.0 L110.0,445.0 Z"/>
-      <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="26" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M113.6,276.0 L118.5,273.8 L123.6,271.2 L127.8,269.3 L131.2,267.8 L133.6,266.9 L135.3,266.6 L136.8,266.5 L138.3,266.5 L139.8,266.7 L141.2,267.2 L142.4,269.4 L143.4,273.3 L144.2,279.0 L144.8,286.5 L145.4,292.6 L146.2,297.5 L147.1,301.2 L148.1,303.5 L149.1,305.6 L150.2,307.3 L151.4,308.6 L152.7,309.7 L154.3,310.5 L156.1,311.0 L158.2,311.3 L160.6,311.4 L163.0,311.3 L165.3,311.1 L167.5,310.8 L169.6,310.3 L171.9,310.0 L174.3,309.9 L176.9,309.8 L179.6,309.9 L181.8,309.9 L183.5,309.8 L184.6,309.6 L185.2,309.3 L186.3,309.0 L187.8,308.9 L189.8,308.7 L192.3,308.7 L194.5,308.6 L196.6,308.4 L198.4,308.1 L200.0,307.8 L201.6,307.7 L203.2,307.7 L204.8,308.0 L206.3,308.5 L208.6,309.4 L211.8,310.9 L215.8,312.8 L220.7,315.3 L226.0,318.3 L231.6,321.7 L237.6,325.6 L244.1,330.0 L249.3,333.4 L253.4,336.1 L256.2,337.8 L257.9,338.5 L259.7,339.5 L261.5,340.8 L263.5,342.3 L265.6,344.1 L267.6,345.7 L269.5,347.0 L271.4,348.2 L273.2,349.1 L275.1,349.7 L277.0,350.2 L279.0,350.4 L281.0,350.4 L283.1,350.2 L285.2,349.7 L287.5,349.1 L289.8,348.2 L292.2,347.4 L294.6,346.7 L297.1,346.2 L299.7,345.8 L302.0,345.4 L304.3,345.2 L306.4,345.1 L308.3,345.1 L310.3,345.4 L312.4,345.9 L314.6,346.5 L316.9,347.4 L318.9,348.4 L320.6,349.5 L322.0,350.6 L323.1,351.8 L324.3,353.4 L325.4,355.3 L326.5,357.5 L327.6,360.2 L328.8,361.7"/>
-    </group>
-    <group android:translateX="334.00" android:translateY="369.00" android:rotation="144.2" android:scaleX="1.7" android:scaleY="1.7">
+    android:width="24dp" android:height="24dp" android:viewportWidth="486" android:viewportHeight="486">
+  <group android:translateX="20.0" android:translateY="-62.4">
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="40" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M0.0,329.0 L1.6,331.3 L5.4,336.6 L11.4,344.9 L19.6,356.2 L30.3,368.6 L43.6,381.3 L59.6,394.3 L78.3,407.8 L97.9,418.7 L118.1,426.3 L138.6,430.4 L159.7,431.0 L178.6,428.5 L194.5,422.8 L207.4,414.1 L217.4,402.2 L226.2,391.5 L234.6,383.3 L242.5,377.7 L250.0,374.6 L259.7,372.6 L272.7,371.0 L289.0,369.9 L308.5,369.3 L327.1,368.1 L343.4,365.8 L357.5,362.5 L369.4,358.2 L379.2,353.7 L387.1,349.3 L392.9,344.9 L396.8,340.5 L399.4,334.2 L401.0,325.2 L401.6,313.5 L401.2,299.2 L400.6,287.0 L400.3,278.6 L400.0,273.9 L400.0,273.0"/>
+    <group android:translateX="400.0" android:translateY="240.3" android:scaleX="3.0" android:scaleY="3.0">
       <group android:translateX="-24" android:translateY="-24">
         <path android:fillColor="#FFFFFF" android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineJoin="round" android:pathData="M24,4L8.5,44L24,34.91L39.5,44Z"/>
       </group>

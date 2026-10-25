@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FOLLO Tracks launcher: FOLLO wordmark over a folded contour map with the Arthur River tracklog and the nav arrow (icon concept 140, 24 Oct 2026). Foreground is a bitmap per density; the monochrome layer is a vector outline. -->
+<!-- FOLLO Tracks launcher (icon concept 142, 25 Oct 2026): FOLLO wordmark, magenta tracklog and nav arrow over 20 m contours.
+     Background = the contours on map green (bitmap, cut wider than the icon so the visible area is filled); foreground = wordmark,
+     track and arrow inside the 66 dp safe zone; monochrome = the same without colour. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
+    <background android:drawable="@mipmap/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>
