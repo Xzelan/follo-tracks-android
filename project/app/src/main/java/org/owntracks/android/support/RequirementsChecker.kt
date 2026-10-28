@@ -5,6 +5,9 @@ interface RequirementsChecker {
 
   fun hasBackgroundLocationPermission(): Boolean
 
+  /** FOLLO: fine (precise) location, not just approximate (review 28 Oct 2026, B1). */
+  fun hasPreciseLocationPermission(): Boolean
+
   fun isLocationServiceEnabled(): Boolean
 
   fun isPlayServicesCheckPassed(): Boolean

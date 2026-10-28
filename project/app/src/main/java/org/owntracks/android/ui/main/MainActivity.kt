@@ -126,6 +126,8 @@ class MainActivity :
     NOT_SET_UP,
     NEED_LOCATION,
     LOCATION_OFF,
+    /** Approximate location only (Android 12+); every fix fails the 100 m filter (B1, 28 Oct 2026). */
+    NEED_PRECISE,
     NEED_BACKGROUND,
     NEED_NOTIFICATIONS,
     NEED_BATTERY,
@@ -710,6 +712,11 @@ class MainActivity :
             openAppSettings()
           } else requestLocation()
       Kind.LOCATION_OFF -> settingsLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+      Kind.NEED_PRECISE -> {
+        // The precise/approximate switch lives on the app's Location permission page (Android 12+).
+        Toast.makeText(this, R.string.follo_precise_howto, Toast.LENGTH_LONG).show()
+        openAppSettings()
+      }
       Kind.NEED_BACKGROUND -> requestBackgroundLocation()
       Kind.NEED_NOTIFICATIONS ->
           if (preferences.userDeclinedEnableNotificationPermissions) openAppSettings()
@@ -748,6 +755,10 @@ class MainActivity :
         return Banner(Kind.NEED_LOCATION, red, s(R.string.follo_action_title), s(R.string.follo_perm_location_sub), s(R.string.follo_perm_location_btn))
     if (!requirementsChecker.isLocationServiceEnabled())
         return Banner(Kind.LOCATION_OFF, red, s(R.string.follo_action_title), s(R.string.follo_location_off_sub), s(R.string.follo_location_off_btn))
+    // Approximate-only location (Android 12+): the phone has "location" but every fix is ~2 km, so the 100 m filter
+    // drops them all, the check-in included, and the phone goes silent (review 28 Oct 2026, B1; iOS has this banner).
+    if (!requirementsChecker.hasPreciseLocationPermission())
+        return Banner(Kind.NEED_PRECISE, red, s(R.string.follo_action_title), s(R.string.follo_precise_sub), s(R.string.follo_precise_btn))
     if (!requirementsChecker.hasBackgroundLocationPermission() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
         return Banner(Kind.NEED_BACKGROUND, red, s(R.string.follo_action_title), s(R.string.follo_bg_sub), s(R.string.follo_bg_btn))
     // Notifications off is not red: the location service runs without them, its notification is just hidden

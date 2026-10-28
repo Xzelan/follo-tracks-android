@@ -20,6 +20,10 @@ open class OSSRequirementsChecker @Inject constructor(open val context: Context)
           ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
               PackageManager.PERMISSION_GRANTED
 
+  override fun hasPreciseLocationPermission(): Boolean =
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
+
   override fun hasBackgroundLocationPermission(): Boolean =
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         ContextCompat.checkSelfPermission(

@@ -30,6 +30,11 @@
     <string name="follo_perm_location_btn">Allow location</string>
     <string name="follo_location_off_sub">Location is off, so FOLLO can\'t see you</string>
     <string name="follo_location_off_btn">Turn location on</string>
+    <!-- 28 Oct 2026 review B1: Android 12+ lets a person grant Approximate only; every fix then fails the 100 m filter
+         and the phone goes silent with a green-looking screen. Same banner as iOS. -->
+    <string name="follo_precise_sub">Precise location is off, so FOLLO can\'t record where you search</string>
+    <string name="follo_precise_btn">Turn on precise location</string>
+    <string name="follo_precise_howto">Permissions › Location › Use precise location</string>
     <string name="follo_bg_sub">Location is set to While Using, so tracking stops when your screen locks</string>
     <string name="follo_bg_btn">Set location to Always</string>
     <string name="follo_notif_sub">Android needs a notification to keep tracking running</string>
