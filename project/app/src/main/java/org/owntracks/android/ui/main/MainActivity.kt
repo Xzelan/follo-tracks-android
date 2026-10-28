@@ -133,6 +133,8 @@ class MainActivity :
     NEED_BATTERY,
     /** The server answered 401/403: blocked, or the setup link was re-issued (B2, 28 Oct 2026). */
     REJECTED,
+    /** Inside the area in search hours, but not tracking yet: amber, no button (B10, 28 Oct 2026). */
+    WAITING,
     SHARING,
     STANDBY,
     SETTING_UP,
@@ -753,6 +755,7 @@ class MainActivity :
     val green = getColor(R.color.follo_green)
     val grey = getColor(R.color.follo_grey)
     val red = getColor(R.color.follo_red)
+    val amber = getColor(R.color.follo_amber)
     fun s(id: Int) = getString(id)
     if (!viewModel.setupCompleted.value)
         return Banner(Kind.NOT_SET_UP, grey, s(R.string.follo_not_setup_title), s(R.string.follo_not_setup_sub))
@@ -800,6 +803,15 @@ class MainActivity :
         }
     if (sharing) {
       val queued = backlog()
+      // Green only while the phone really is tracking (review 28 Oct 2026, B10). Inside the area but still in Manual
+      // (the server's Move never arrived, or the check-in is queued behind no signal) the phone records nothing, so the
+      // old green "positions saved" line was false; and in Move with nothing accepted for a minute and nothing queued,
+      // it has no usable fix. Same on iOS.
+      if (!viewModel.isMoving)
+          return Banner(Kind.WAITING, amber, s(R.string.follo_waiting_title),
+              s(if (queued > 0) R.string.follo_waiting_nosignal_sub else R.string.follo_waiting_sub))
+      if (queued == 0 && System.currentTimeMillis() - viewModel.lastSentAt.value > SENT_STALE_MS)
+          return Banner(Kind.WAITING, amber, s(R.string.follo_waiting_fix_title), s(R.string.follo_waiting_fix_sub))
       val sub =
           when {
             queued == 1 -> s(R.string.follo_offline_sub_one)
@@ -1719,6 +1731,8 @@ class MainActivity :
     private const val PAIR_M = 20.0
     private const val PAIR_TOL_M = 1.0
     private const val NO_SIGNAL_AFTER_MS = 10_000L
+    /** A sharing phone with nothing accepted for this long (and nothing queued) is waiting on a fix (B10). */
+    private const val SENT_STALE_MS = 60_000L
     /** Radius of the invisible circle, as a fraction of the visible map's shorter side. */
     private const val LEASH_FRACTION = 0.25f
     /** How long one glide takes; about the time between fixes, so the map moves continuously. */

@@ -12,6 +12,12 @@
     <string name="follo_sharing_sub"> </string>
     <string name="follo_offline_sub">No signal. %1$d positions saved, sent when back in range</string>
     <string name="follo_offline_sub_one">No signal. 1 position saved, sent when back in range</string>
+    <!-- 28 Oct 2026 review B10: amber while inside the area but not actually tracking; same words on iOS -->
+    <string name="follo_waiting_title">Waiting for FOLLO to start tracking</string>
+    <string name="follo_waiting_sub">Press and hold the card below to check in now</string>
+    <string name="follo_waiting_nosignal_sub">No signal yet, so FOLLO can\'t start this phone. It starts by itself when signal returns</string>
+    <string name="follo_waiting_fix_title">Waiting for a GPS fix</string>
+    <string name="follo_waiting_fix_sub">No position for over a minute. Keep the phone where it can see the sky</string>
 
     <string name="follo_standby_title">Standing by</string>
     <string name="follo_standby_sub">Sharing starts by itself in search hours, inside the search area</string>

@@ -13,4 +13,5 @@
     <!-- The phone's own walking track (21 Oct 2026); magenta like QField tracklogs (255,0,255); same on iOS -->
     <color name="follo_track">#FF00FF</color>
     <color name="follo_note">#8A5A00</color> <!-- amber advisory text on the card -->
+    <color name="follo_amber">#8A5A00</color> <!-- in the area but not yet tracking (review B10, 28 Oct 2026); 5.9:1 under white; same on iOS -->
 </resources>
