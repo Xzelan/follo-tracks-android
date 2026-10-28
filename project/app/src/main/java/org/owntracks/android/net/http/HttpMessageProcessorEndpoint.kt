@@ -131,6 +131,9 @@ class HttpMessageProcessorEndpoint(
                     String.format(Locale.ROOT, "HTTP code %d", response.code),
                 ),
             )
+            // FOLLO: 401/403 = this phone is blocked or its password changed (review 28 Oct 2026, B2). The queue is
+            // kept and retried at the usual 30 s cap, as on iOS, so an unblocked phone recovers by itself.
+            if (response.code == 401 || response.code == 403) messageProcessor.onServerRejected(response.code)
             messageProcessor.onMessageDeliveryFailed(message)
             Result.failure(OutgoingMessageSendingException(httpException))
           } else {

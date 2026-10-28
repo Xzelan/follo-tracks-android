@@ -54,7 +54,7 @@ constructor(
     private val waypointsRepo: WaypointsRepo,
     locationRepo: LocationRepo,
     endpointStateRepo: EndpointStateRepo,
-    folloStatusRepo: FolloStatusRepo,
+    private val folloStatusRepo: FolloStatusRepo,
     private val folloTrackRepo: FolloTrackRepo,
     private val deviceMetricsProvider: DeviceMetricsProvider,
     private val parser: Parser,
@@ -90,6 +90,8 @@ constructor(
 
   /** Last status element from the server; null until the phone has posted once. */
   val folloStatus: StateFlow<FolloStatusRepo.Status?> = folloStatusRepo.status
+  /** The server answered 401/403 to the last send (review 28 Oct 2026, B2). */
+  val rejected: StateFlow<Boolean> = folloStatusRepo.rejected
   /** When the server last accepted a position from this phone (0 = never). */
   val lastSentAt: StateFlow<Long> = folloStatusRepo.lastSentAt
   val setupCompleted = MutableStateFlow(preferences.setupCompleted)
@@ -227,6 +229,7 @@ constructor(
       if (config.waypoints.isNotEmpty()) waypointsRepo.importFromMessage(config.waypoints)
       (config["folloName"] as? String)?.let { preferences.displayName = it }
       folloTrackRepo.clear() // a new setup starts a clean track
+      folloStatusRepo.setRejected(false) // and a clean slate with the server
       preferences.setupCompleted = true
       setupCompleted.value = true
       Timber.i("FOLLO setup applied for tid=${preferences.tid}")

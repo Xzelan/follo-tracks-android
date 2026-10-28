@@ -35,6 +35,9 @@
     <string name="follo_precise_sub">Precise location is off, so FOLLO can\'t record where you search</string>
     <string name="follo_precise_btn">Turn on precise location</string>
     <string name="follo_precise_howto">Permissions › Location › Use precise location</string>
+    <!-- 28 Oct 2026 review B2/B14: the server answered 401/403 (phone blocked or its link re-issued); same as iOS -->
+    <string name="follo_rejected_title">FOLLO rejected this phone</string>
+    <string name="follo_rejected_sub">Ask base camp for a new setup link</string>
     <string name="follo_bg_sub">Location is set to While Using, so tracking stops when your screen locks</string>
     <string name="follo_bg_btn">Set location to Always</string>
     <string name="follo_notif_sub">Android needs a notification to keep tracking running</string>

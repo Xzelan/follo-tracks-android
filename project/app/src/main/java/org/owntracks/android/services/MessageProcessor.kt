@@ -451,6 +451,7 @@ constructor(
                       ?: run {
                         Timber.d("Message sent successfully: $message")
                         lastMessageStatus = LastMessageStatus.Success
+                        folloStatusRepo.setRejected(false)
                         if (message is MessageLocation) {
                           folloStatusRepo.markSent()
                         }
@@ -539,6 +540,12 @@ constructor(
     }
     // Wake up any suspended awaitMessage() call to retry immediately
     outgoingQueue.signalMessageAvailable()
+  }
+
+  /** FOLLO: the server answered 401/403 (review 28 Oct 2026, B2): the banner goes red until a send gets through. */
+  fun onServerRejected(code: Int) {
+    Timber.w("Server rejected this phone with HTTP $code")
+    folloStatusRepo.setRejected(true)
   }
 
   fun onMessageDeliveryFailedFinal(message: MessageBase) {

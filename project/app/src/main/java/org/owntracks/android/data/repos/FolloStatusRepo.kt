@@ -24,6 +24,16 @@ constructor(@ApplicationContext context: Context, private val parser: Parser) {
 
   val status = MutableStateFlow(load())
 
+  /**
+   * The server answered 401/403 to the last send: it no longer accepts this phone (blocked, or its link was
+   * re-issued). Not persisted, like iOS: the next send settles it either way (review 28 Oct 2026, B2).
+   */
+  val rejected = MutableStateFlow(false)
+
+  fun setRejected(value: Boolean) {
+    if (rejected.value != value) rejected.value = value
+  }
+
   /** Epoch ms of the last location the server actually accepted (0 = none yet). */
   val lastSentAt = MutableStateFlow(prefs.getLong(KEY_LAST_SENT, 0L))
 

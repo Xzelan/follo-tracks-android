@@ -131,6 +131,8 @@ class MainActivity :
     NEED_BACKGROUND,
     NEED_NOTIFICATIONS,
     NEED_BATTERY,
+    /** The server answered 401/403: blocked, or the setup link was re-issued (B2, 28 Oct 2026). */
+    REJECTED,
     SHARING,
     STANDBY,
     SETTING_UP,
@@ -303,6 +305,7 @@ class MainActivity :
               }
         }
         launch { viewModel.lastSentAt.collect { render() } }
+        launch { viewModel.rejected.collect { render() } }
         launch {
           viewModel.folloStatus.collect {
             drawAreaBox(it?.message)
@@ -767,6 +770,10 @@ class MainActivity :
         return Banner(Kind.NEED_BATTERY, red, s(R.string.follo_action_title),
             batteryText(R.string.follo_battery_sub_samsung, R.string.follo_battery_sub_14, R.string.follo_battery_sub_12, R.string.follo_battery_sub),
             s(R.string.follo_battery_btn))
+    // The server turned the last send away (401/403): blocked, or the link was re-issued (B2/B14, 28 Oct 2026). Red,
+    // with the remedy, instead of "No signal. N positions saved" for ever; the queue is kept and retried as on iOS.
+    if (viewModel.rejected.value)
+        return Banner(Kind.REJECTED, red, s(R.string.follo_rejected_title), s(R.string.follo_rejected_sub))
     val server =
         viewModel.folloStatus.value
             ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }
