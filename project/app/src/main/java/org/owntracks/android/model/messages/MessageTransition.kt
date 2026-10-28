@@ -70,8 +70,9 @@ class MessageTransition(
   override val baseTopicSuffix: String
     get() = BASETOPIC_SUFFIX
 
+  // FOLLO: no coordinates here, because this string ends up in logcat on every failed send (review B5, 28 Oct 2026).
   override fun toString(): String =
-      "[MessageTransition ts=${Instant.fromEpochSeconds(timestamp)},event=$event,desc=$description,lon=$longitude,lat=$latitude,acc=$accuracy,trigger=$trigger,trackerId=$trackerId]"
+      "[MessageTransition ts=${Instant.fromEpochSeconds(timestamp)},event=$event,desc=$description,acc=$accuracy,trigger=$trigger,trackerId=$trackerId]"
 
   companion object {
     const val TYPE = "transition"

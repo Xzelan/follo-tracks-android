@@ -203,7 +203,8 @@ constructor(
               return SetupLink.Bad("could not fetch configuration: ${e.message}")
             }
           }
-          else -> return SetupLink.Bad("not a setup link: $uri")
+          // Scheme, host and path only: the query of a real link carries the signing key (review B5, 28 Oct 2026).
+          else -> return SetupLink.Bad("not a setup link: ${uri.scheme}://${uri.host}${uri.path}")
         }
     val config =
         try {
