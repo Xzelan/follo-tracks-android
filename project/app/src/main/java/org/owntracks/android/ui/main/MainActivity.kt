@@ -639,6 +639,7 @@ class MainActivity :
         .setCancelable(false)
         .setPositiveButton(R.string.follo_disclosure_continue) { _, _ ->
           // The disclosure is the rationale, so Android's prompt follows it directly.
+          preferences.locationPromptShown = true
           locationPermissionRequester.requestLocationPermissions(0, this) { false }
         }
         .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
@@ -707,7 +708,10 @@ class MainActivity :
   private fun onActionClicked() {
     when (state?.kind) {
       Kind.NEED_LOCATION ->
+          // Settings only once Android itself has refused to ask again: the rationale flag is also false when
+          // the system prompt has never been shown ("Not now" on our disclosure; B3, 28 Oct 2026).
           if (preferences.userDeclinedEnableLocationPermissions &&
+              preferences.locationPromptShown &&
               !shouldShowRequestPermissionRationale(
                   android.Manifest.permission.ACCESS_FINE_LOCATION
               )) {

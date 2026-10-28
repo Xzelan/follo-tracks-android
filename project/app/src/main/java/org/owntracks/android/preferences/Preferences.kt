@@ -364,6 +364,10 @@ constructor(
   // Preferences we store but don't export / import
   var firstStart: Boolean by preferencesStore
   var setupCompleted: Boolean by preferencesStore
+  // FOLLO: Android's location prompt has been launched at least once. "Not now" on our own disclosure sets
+  // userDeclinedEnableLocationPermissions too, but shouldShowRequestPermissionRationale is false until the
+  // system prompt has been shown, so without this the red button went to Settings instead of asking (B3, 28 Oct 2026).
+  var locationPromptShown: Boolean by preferencesStore
   // FOLLO: the volunteer's name as the server knows it (from the setup link); shown on the card only.
   var displayName: String by preferencesStore
 

@@ -68,6 +68,7 @@ interface DefaultsProvider {
       Preferences::cmd -> true
       Preferences::remoteConfiguration -> false
       Preferences::setupCompleted -> false
+      Preferences::locationPromptShown -> false
       Preferences::showRegionsOnMap -> false
       Preferences::sub -> true
       Preferences::subQos -> MqttQos.Two
