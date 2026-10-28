@@ -20,7 +20,9 @@
     <string name="follo_waiting_fix_sub">No position for over a minute. Keep the phone where it can see the sky</string>
 
     <string name="follo_standby_title">Standing by</string>
-    <string name="follo_standby_sub">Sharing starts by itself in search hours, inside the search area</string>
+    <!-- 28 Oct 2026 review B13: a phone already inside the area when the hours start gets no enter event, so it only
+         starts on its next post (e.g. the check-in when the app is opened) -->
+    <string name="follo_standby_sub">Sharing starts when you enter the search area in search hours, or when you open the app inside it</string>
     <string name="follo_standby_outside_title">Standing by: outside the search area</string>
     <string name="follo_standby_outside_sub">Sharing starts by itself when you enter the area</string>
     <!-- Under Standing by: which searches' wake-up circles the phone holds (Alex 25 Oct 2026; same wording on iOS) -->
