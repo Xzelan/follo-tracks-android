@@ -10,6 +10,10 @@
         <exclude
             domain="sharedpref"
             path="follo_track.xml" />
+        <!-- and the last server status, which names teammates' location topics (review B4, 28 Oct 2026) -->
+        <exclude
+            domain="sharedpref"
+            path="follo_status.xml" />
         <exclude
             domain="sharedpref"
             path="au.org.follo.tracks_preferences.xml" />
