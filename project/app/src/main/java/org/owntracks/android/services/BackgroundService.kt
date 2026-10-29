@@ -77,7 +77,6 @@ import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageTransition
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
-import org.owntracks.android.preferences.types.ConnectionMode
 import org.owntracks.android.preferences.types.MonitoringMode
 import org.owntracks.android.preferences.types.MonitoringMode.Companion.getByValue
 import org.owntracks.android.services.worker.Scheduler
@@ -373,7 +372,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           }
           return
         }
-        // FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in (FolloPushService)
+        // FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in
+        // (FolloPushService)
         INTENT_ACTION_FOLLO_CHECKIN -> {
           folloCheckIn()
           return
@@ -666,45 +666,90 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     }
   }
 
-  /** A push check-in waiting for its fix; after 30 s without one the person is asked to open the app. */
-  @Volatile private var folloCheckInPending = false
+  /** The check-in listener while one is running (null = none); see [folloCheckIn]. */
+  private var folloCheckInCallback: LocationCallback? = null
 
   /**
-   * FOLLO push "check in" (29 Oct 2026): one fresh high-accuracy fix, posted as report type
-   * "response" (fd.src = response), so the server can start the phone if it is inside the area or a
-   * Basecamp circle. Standing by (Manual) the service asks for no other positions, so this one-shot
-   * request is the whole job. No fix within 30 s (indoors, location off) => the fallback
-   * notification, like the no-permission case.
+   * FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in, or its push token
+   * is new. Listens for fixes (high accuracy, every second) for up to [FOLLO_CHECKIN_LISTEN] and
+   * posts the FIRST one under [FOLLO_CHECKIN_MAX_ACC_M] as report type "user" (the one report a
+   * standing-by phone may make; LocationProcessor.onCheckInLocation skips the rules that drop a
+   * network fix). A worse fix is waited out, not posted. Nothing good within
+   * [FOLLO_CHECKIN_FALLBACK] => the "open FOLLO Tracks" notification, while still listening; a fix
+   * that then arrives is posted and the notification taken down. (Field test 29 Oct 2026: a 30 s
+   * single request gave up before the GPS fix came on one Samsung and lost a 15-20 m network fix on
+   * the other.)
    */
   private fun folloCheckIn() {
     if (!requirementsChecker.hasLocationPermissions()) {
       FolloCheckInNotification.show(this, null)
       return
     }
-    val inner = callbackForReportType[MessageLocation.ReportType.RESPONSE]!!.value
-    folloCheckInPending = true
-    locationProviderClient.singleHighAccuracyLocation(
+    folloCheckInCallback?.let { locationProviderClient.removeLocationUpdates(it) }
+    var done = false
+    val startedAt = SystemClock.elapsedRealtime()
+    lateinit var callback: LocationCallback
+    callback =
         object : LocationCallback {
           override fun onLocationResult(locationResult: LocationResult) {
-            folloCheckInPending = false
-            inner.onLocationResult(locationResult)
+            if (done) return
+            val l = locationResult.lastLocation
+            if (!l.hasAccuracy() || l.accuracy >= FOLLO_CHECKIN_MAX_ACC_M) {
+              Timber.i(
+                  "check-in: fix of ${l.accuracy.toInt()} m (${l.provider}), waiting for a better one"
+              )
+              return
+            }
+            done = true
+            lifecycleScope.launch {
+              val posted = locationProcessor.onCheckInLocation(l)
+              Timber.i(
+                  "check-in: ${l.accuracy.toInt()} m ${l.provider} fix after ${(SystemClock.elapsedRealtime() - startedAt) / 1000} s, posted=$posted"
+              )
+              if (posted) FolloCheckInNotification.cancel(this@BackgroundService)
+              stopFolloCheckIn(callback)
+            }
           }
 
-          override fun onLocationError() = inner.onLocationError()
+          override fun onLocationError() {
+            Timber.w("check-in: location error")
+          }
 
-          override fun onLocationAvailability(locationAvailability: LocationAvailability) =
-              inner.onLocationAvailability(locationAvailability)
-        },
+          override fun onLocationAvailability(locationAvailability: LocationAvailability) {
+            Timber.d("check-in: availability $locationAvailability")
+          }
+        }
+    folloCheckInCallback = callback
+    locationProviderClient.requestLocationUpdates(
+        LocationRequest(
+            fastestInterval = Duration.ofSeconds(1),
+            priority = LocatorPriority.HighAccuracy,
+            interval = Duration.ofSeconds(1),
+            expirationDuration = Duration.ofMillis(FOLLO_CHECKIN_LISTEN.inWholeMilliseconds),
+        ),
+        callback,
         runThingsOnOtherThreads.getBackgroundLooper(),
     )
     lifecycleScope.launch {
-      delay(FOLLO_CHECKIN_TIMEOUT)
-      if (folloCheckInPending) {
-        folloCheckInPending = false
-        Timber.w("check-in: no fix within $FOLLO_CHECKIN_TIMEOUT, asking the person to open the app")
+      delay(FOLLO_CHECKIN_FALLBACK)
+      if (!done) {
+        Timber.w(
+            "check-in: no fix under ${FOLLO_CHECKIN_MAX_ACC_M.toInt()} m within $FOLLO_CHECKIN_FALLBACK, asking the person to open the app"
+        )
         FolloCheckInNotification.show(this@BackgroundService, null)
       }
+      delay(FOLLO_CHECKIN_LISTEN - FOLLO_CHECKIN_FALLBACK)
+      if (!done) {
+        done = true
+        Timber.w("check-in: giving up after $FOLLO_CHECKIN_LISTEN")
+        stopFolloCheckIn(callback)
+      }
     }
+  }
+
+  private fun stopFolloCheckIn(callback: LocationCallback) {
+    locationProviderClient.removeLocationUpdates(callback)
+    if (folloCheckInCallback === callback) folloCheckInCallback = null
   }
 
   fun requestOnDemandLocationUpdate(reportType: MessageLocation.ReportType) {
@@ -889,7 +934,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   fun reInitializeLocationRequests() {
     Timber.v("Reinitializing location requests")
-    // FOLLO: a permission granted after the service started means the geofences were never registered
+    // FOLLO: a permission granted after the service started means the geofences were never
+    // registered
     lifecycleScope.launch { setupGeofences() }
     runThingsOnOtherThreads.postOnServiceHandlerDelayed(
         {
@@ -929,9 +975,12 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         "org.owntracks.android.CLEAR_EVENT_NOTIFICATIONS"
     private const val INTENT_ACTION_CLEAR_CONTACTS = "org.owntracks.android.CLEAR_CONTACTS"
     const val INTENT_ACTION_CHANGE_MONITORING = "org.owntracks.android.CHANGE_MONITORING"
-    // FOLLO push "check in" (29 Oct 2026): sent by FolloPushService when base camp asks for a check-in
+    // FOLLO push "check in" (29 Oct 2026): FolloPushService (base camp asks) / PushTokenRegistrar
+    // (new token)
     const val INTENT_ACTION_FOLLO_CHECKIN = "au.org.follo.tracks.CHECKIN"
-    private val FOLLO_CHECKIN_TIMEOUT = 30.seconds
+    private val FOLLO_CHECKIN_FALLBACK = 90.seconds
+    private val FOLLO_CHECKIN_LISTEN = 180.seconds
+    private const val FOLLO_CHECKIN_MAX_ACC_M = 100f
     private const val INTENT_ACTION_RESTART_AFTER_TASK_REMOVED =
         "org.owntracks.android.RESTART_AFTER_TASK_REMOVED"
     private const val INTENT_ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED"

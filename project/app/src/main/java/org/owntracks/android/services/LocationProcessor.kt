@@ -116,19 +116,39 @@ constructor(
   private val transitionDebounceDwell: Duration = Duration.ofMinutes(2)
   private val pendingWaypointTransitions = mutableMapOf<Long, PendingWaypointTransition>()
 
+  /**
+   * FOLLO push "check in" (29 Oct 2026): a fix the tracking service gathered because base camp
+   * asked this phone to check in (or because its push token is new). The caller has already
+   * required accuracy under 100 m; the accuracy-threshold and "network fix after a recent GPS fix"
+   * rules must not drop it (FOLLO-R field test: a 15-20 m network fix was thrown away and nothing
+   * was posted). Sent as report type "user", the one report a standing-by (Manual) phone may make.
+   */
+  suspend fun onCheckInLocation(location: Location): Boolean =
+      publishLocationMessage(MessageLocation.ReportType.USER, location, checkIn = true).run {
+        if (isSuccess) {
+          locationRepo.setCurrentPublishedLocation(location)
+          true
+        } else {
+          Timber.i("check-in fix dropped: ${exceptionOrNull()?.message}")
+          false
+        }
+      }
+
   private suspend fun publishLocationMessage(
       trigger: MessageLocation.ReportType,
       location: Location,
+      checkIn: Boolean = false,
   ): Result<Unit> {
     Timber.v("Maybe publishing $location with trigger $trigger")
-    if (!locationIsWithAccuracyThreshold(location))
+    if (!checkIn && !locationIsWithAccuracyThreshold(location))
         return Result.failure(Exception("location accuracy too low"))
 
     // If this location has come from the network *and* the most recent location was both recent and
     // high-accuracy, then it's probably not usefully accurate. Drop it.
     locationRepo.currentPublishedLocation.value?.let { lastLocation ->
       if (
-          location.provider == "network" &&
+          !checkIn &&
+              location.provider == "network" &&
               highAccuracyProviders.contains(lastLocation.provider) &&
               location.time - lastLocation.time <
                   preferences.discardNetworkLocationThresholdSeconds * 1000

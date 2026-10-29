@@ -13,10 +13,11 @@ import timber.log.Timber
 /**
  * FOLLO push "check in" (29 Oct 2026). Base camp's live map can ask every phone of a search to
  * check in now: the FOLLO server sends a high-priority FCM data message `{act: "checkin", …}`. The
- * phone takes a fresh fix and posts it (BackgroundService, report type "response"); the server
- * answers Move if it is inside the area or a Basecamp circle. The person sees nothing unless they
- * are started. When the app cannot post by itself it shows one notification asking them to open the
- * app instead. Any other `act` is ignored. A new token is posted at once (PushTokenRegistrar).
+ * phone takes a fresh fix and posts it (BackgroundService.folloCheckIn, report type "user"); the
+ * server answers Move if it is inside the area or a Basecamp circle. The person sees nothing unless
+ * they are started. When the app cannot post by itself it shows one notification asking them to
+ * open the app instead. Any other `act` is ignored. A new token is posted at once
+ * (PushTokenRegistrar).
  */
 @AndroidEntryPoint
 class FolloPushService : FirebaseMessagingService() {

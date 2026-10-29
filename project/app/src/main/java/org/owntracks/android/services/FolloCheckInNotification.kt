@@ -51,4 +51,9 @@ object FolloCheckInNotification {
             .build()
     manager.notify(NOTIFICATION_ID, notification)
   }
+
+  /** The check-in got through after all (a late fix): take the request down. */
+  fun cancel(context: Context) {
+    NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+  }
 }

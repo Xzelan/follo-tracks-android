@@ -15,11 +15,11 @@ import timber.log.Timber
 /**
  * FOLLO push "check in" (29 Oct 2026): where a Firebase token lands (App.setUpPush,
  * FolloPushService.onNewToken). A token the server has not seen is sent at once: the phone posts
- * one position (the same "send now" as the check-in on open, report type "user") and the fd
- * inclusion rule's "token changed" branch puts `pt` in it. Only when set-up is complete, a location
- * permission exists, and the app is in front or its tracking service already runs: a service
- * started from the background would be refused by Android 12+ and must not crash the app for a
- * token; a rotated token then simply rides on the next post.
+ * one position (the push check-in path, BackgroundService.folloCheckIn, report type "user") and the
+ * fd inclusion rule's "token changed" branch puts `pt` in it. Only when set-up is complete, a
+ * location permission exists, and the app is in front or its tracking service already runs: a
+ * service started from the background would be refused by Android 12+ and must not crash the app
+ * for a token; a rotated token then simply rides on the next post.
  */
 @Singleton
 class PushTokenRegistrar
@@ -49,7 +49,7 @@ constructor(
       ContextCompat.startForegroundService(
           context,
           Intent(context, BackgroundService::class.java)
-              .setAction(BackgroundService.INTENT_ACTION_SEND_LOCATION_USER),
+              .setAction(BackgroundService.INTENT_ACTION_FOLLO_CHECKIN),
       )
       Timber.i("push token: posting a position so the server gets it")
     } catch (e: Exception) {
