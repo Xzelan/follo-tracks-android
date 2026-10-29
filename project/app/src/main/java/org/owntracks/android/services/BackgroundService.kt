@@ -44,6 +44,7 @@ import javax.inject.Named
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -372,6 +373,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           }
           return
         }
+        // FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in (FolloPushService)
+        INTENT_ACTION_FOLLO_CHECKIN -> {
+          folloCheckIn()
+          return
+        }
         // This comes from the [GeofencingBroadcastReceiver]
         INTENT_ACTION_SEND_EVENT_CIRCULAR -> {
           val event = fromIntent(intent)
@@ -660,6 +666,47 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     }
   }
 
+  /** A push check-in waiting for its fix; after 30 s without one the person is asked to open the app. */
+  @Volatile private var folloCheckInPending = false
+
+  /**
+   * FOLLO push "check in" (29 Oct 2026): one fresh high-accuracy fix, posted as report type
+   * "response" (fd.src = response), so the server can start the phone if it is inside the area or a
+   * Basecamp circle. Standing by (Manual) the service asks for no other positions, so this one-shot
+   * request is the whole job. No fix within 30 s (indoors, location off) => the fallback
+   * notification, like the no-permission case.
+   */
+  private fun folloCheckIn() {
+    if (!requirementsChecker.hasLocationPermissions()) {
+      FolloCheckInNotification.show(this, null)
+      return
+    }
+    val inner = callbackForReportType[MessageLocation.ReportType.RESPONSE]!!.value
+    folloCheckInPending = true
+    locationProviderClient.singleHighAccuracyLocation(
+        object : LocationCallback {
+          override fun onLocationResult(locationResult: LocationResult) {
+            folloCheckInPending = false
+            inner.onLocationResult(locationResult)
+          }
+
+          override fun onLocationError() = inner.onLocationError()
+
+          override fun onLocationAvailability(locationAvailability: LocationAvailability) =
+              inner.onLocationAvailability(locationAvailability)
+        },
+        runThingsOnOtherThreads.getBackgroundLooper(),
+    )
+    lifecycleScope.launch {
+      delay(FOLLO_CHECKIN_TIMEOUT)
+      if (folloCheckInPending) {
+        folloCheckInPending = false
+        Timber.w("check-in: no fix within $FOLLO_CHECKIN_TIMEOUT, asking the person to open the app")
+        FolloCheckInNotification.show(this@BackgroundService, null)
+      }
+    }
+  }
+
   fun requestOnDemandLocationUpdate(reportType: MessageLocation.ReportType) {
     if (requirementsChecker.hasLocationPermissions()) {
       Timber.d("On demand location request")
@@ -882,6 +929,9 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         "org.owntracks.android.CLEAR_EVENT_NOTIFICATIONS"
     private const val INTENT_ACTION_CLEAR_CONTACTS = "org.owntracks.android.CLEAR_CONTACTS"
     const val INTENT_ACTION_CHANGE_MONITORING = "org.owntracks.android.CHANGE_MONITORING"
+    // FOLLO push "check in" (29 Oct 2026): sent by FolloPushService when base camp asks for a check-in
+    const val INTENT_ACTION_FOLLO_CHECKIN = "au.org.follo.tracks.CHECKIN"
+    private val FOLLO_CHECKIN_TIMEOUT = 30.seconds
     private const val INTENT_ACTION_RESTART_AFTER_TASK_REMOVED =
         "org.owntracks.android.RESTART_AFTER_TASK_REMOVED"
     private const val INTENT_ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED"

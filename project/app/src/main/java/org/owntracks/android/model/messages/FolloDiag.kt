@@ -11,7 +11,9 @@ import kotlinx.serialization.Serializable
  * fg 1 front app / 0 background · au always|inuse|denied · pr precise 0/1 · m monitoring mode ·
  * up seconds since the process started · lr launch reason (boot|update|user|service|?) · bt 1 if
  * the foreground service is running · lp battery saver · q positions queued · src trigger name ·
- * pv version of the search boundary the phone holds (the server repeats `poly` only when this differs)
+ * pv version of the search boundary the phone holds (the server repeats `poly` only when this differs) ·
+ * pn 1 notifications allowed / 0 not · pt push token + pp "fcm" (29 Oct 2026: only when the token changed,
+ * on the first three posts after the process started, or once an hour; see PushTokenRepo)
  */
 @Serializable
 data class FolloDiag(
@@ -26,4 +28,7 @@ data class FolloDiag(
     @SerialName("q") val q: Int? = null,
     @SerialName("src") val src: String? = null,
     @SerialName("pv") val pv: String? = null,
+    @SerialName("pn") val pn: Int? = null,
+    @SerialName("pt") val pt: String? = null,
+    @SerialName("pp") val pp: String? = null,
 )

@@ -27,6 +27,7 @@ constructor(
     @ApplicationContext private val context: Context,
     private val endpointStateRepo: EndpointStateRepo,
     private val folloStatusRepo: FolloStatusRepo,
+    private val pushTokenRepo: PushTokenRepo,
 ) {
   @Volatile private var launchReason: String? = null
 
@@ -57,6 +58,7 @@ constructor(
         ActivityManager.RunningAppProcessInfo().also { ActivityManager.getMyMemoryState(it) }.importance
     val front = importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    val push = pushTokenRepo.fdFields() // FOLLO push "check in" (29 Oct 2026)
     return FolloDiag(
         fg = if (front) 1 else 0,
         au = au,
@@ -69,6 +71,9 @@ constructor(
         q = endpointStateRepo.endpointQueueLength.value,
         src = trigger.name.lowercase(),
         pv = folloStatusRepo.heldPolyVersion(),
+        pn = if (pushTokenRepo.notificationsAllowed()) 1 else 0,
+        pt = push?.first,
+        pp = push?.second,
     )
   }
 }

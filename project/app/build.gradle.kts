@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
@@ -15,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.23"
+val versionNameValue = "0.1.24" // 29 Oct 2026: push "check in" (FCM)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code was never uploaded
 val versionBuild = 1
 
@@ -57,6 +58,17 @@ android {
         "TRANSLATION_COUNT",
         localeCount.toString(),
     )
+
+    // FOLLO push "check in" (29 Oct 2026): Firebase is set up in code (no google-services plugin) from
+    // app/follo_firebase.properties; empty values = no Firebase, no push token, everything else as before.
+    val firebaseProps =
+        Properties().also { props ->
+          file("follo_firebase.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+        }
+    buildConfigField("String", "FIREBASE_APP_ID", "\"${firebaseProps.getProperty("firebase.appId", "").trim()}\"")
+    buildConfigField("String", "FIREBASE_API_KEY", "\"${firebaseProps.getProperty("firebase.apiKey", "").trim()}\"")
+    buildConfigField("String", "FIREBASE_PROJECT_ID", "\"follo-tracks-play\"")
+    buildConfigField("String", "FIREBASE_SENDER_ID", "\"1035664082070\"")
 
     testInstrumentationRunner = "org.owntracks.android.testutils.hilt.CustomTestRunner"
 
@@ -239,6 +251,9 @@ dependencies {
 
   // Connectivity
   implementation(libs.okhttp)
+
+  // FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, initialised in code (App.onCreate)
+  implementation(libs.firebase.messaging)
 
   // Utility libraries
   implementation(libs.bundles.hilt)

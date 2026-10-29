@@ -107,6 +107,16 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging delivers base camp's
+             "every phone, check in" here; Firebase itself is set up in code (App.onCreate). -->
+        <service
+            android:name=".services.FolloPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".support.receiver.StartBackgroundServiceReceiver"
             android:enabled="false"

@@ -27,12 +27,17 @@ import kotlin.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.conscrypt.Conscrypt
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.messaging.FirebaseMessaging
+import org.owntracks.android.data.repos.PushTokenRepo
 import org.owntracks.android.di.CustomBindingComponentBuilder
 import org.owntracks.android.di.CustomBindingEntryPoint
 import org.owntracks.android.geocoding.GeocoderProvider
 import org.owntracks.android.logging.TimberInMemoryLogTree
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.types.AppTheme
+import org.owntracks.android.services.FolloCheckInNotification
 import org.owntracks.android.services.MessageProcessor
 import org.owntracks.android.support.RunThingsOnOtherThreads
 import org.owntracks.android.support.receiver.StartBackgroundServiceReceiver
@@ -67,6 +72,8 @@ open class BaseApp :
     fun notificationManager(): NotificationManagerCompat
 
     fun runThingsOnOtherThreads(): RunThingsOnOtherThreads
+
+    fun pushTokenRepo(): PushTokenRepo
   }
 
   private val preferences by lazy {
@@ -146,6 +153,8 @@ open class BaseApp :
     // place
     createNotificationChannels()
 
+    setUpPush()
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       (this.getSystemService(ACTIVITY_SERVICE) as ActivityManager)
           .getHistoricalProcessExitReasons(this.packageName, 0, 10)
@@ -192,6 +201,37 @@ open class BaseApp :
       AppTheme.Auto -> AppCompatDelegate.setDefaultNightMode(Preferences.SYSTEM_NIGHT_AUTO_MODE)
       AppTheme.Dark -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
       AppTheme.Light -> AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+    }
+  }
+
+  /**
+   * FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, set up in code from the values in
+   * app/follo_firebase.properties (no google-services plugin). Without them the app runs exactly as
+   * before: no token, nothing to receive. The token goes to the server inside the next location
+   * post's diagnostics (PushTokenRepo); FolloPushService receives base camp's "check in".
+   */
+  private fun setUpPush() {
+    if (BuildConfig.FIREBASE_APP_ID.isEmpty() || BuildConfig.FIREBASE_API_KEY.isEmpty()) {
+      Timber.i("push off: no Firebase config")
+      return
+    }
+    try {
+      FirebaseApp.initializeApp(
+          this,
+          FirebaseOptions.Builder()
+              .setApplicationId(BuildConfig.FIREBASE_APP_ID)
+              .setApiKey(BuildConfig.FIREBASE_API_KEY)
+              .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
+              .setGcmSenderId(BuildConfig.FIREBASE_SENDER_ID)
+              .build(),
+      )
+      val repo = EarlyEntryPoints.get(this, ApplicationEntrypoint::class.java).pushTokenRepo()
+      FirebaseMessaging.getInstance()
+          .token
+          .addOnSuccessListener { repo.token = it }
+          .addOnFailureListener { Timber.w(it, "push token not available") }
+    } catch (e: Exception) {
+      Timber.e(e, "push off: Firebase did not start")
     }
   }
 
@@ -248,6 +288,19 @@ open class BaseApp :
           } else {
             "Errors"
           }
+      // FOLLO push "check in" (29 Oct 2026): "open FOLLO Tracks" when the phone cannot post by itself
+      NotificationChannel(
+              FolloCheckInNotification.CHANNEL_ID,
+              getString(R.string.follo_msgs_channel),
+              NotificationManager.IMPORTANCE_DEFAULT,
+          )
+          .apply {
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            description = getString(R.string.follo_msgs_channel_desc)
+            setShowBadge(true)
+          }
+          .run { notificationManager.createNotificationChannel(this) }
+
       NotificationChannel(
               GeocoderProvider.ERROR_NOTIFICATION_CHANNEL_ID,
               errorNotificationChannelName,

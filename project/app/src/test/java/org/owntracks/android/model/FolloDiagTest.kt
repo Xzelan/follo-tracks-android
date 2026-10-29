@@ -29,6 +29,17 @@ class FolloDiagTest {
     assertTrue(json, json.contains("\"pv\":\"a1b2c3d4\""))
     assertTrue("fd must stay small: $json", json.substringAfter("\"fd\":").length < 150)
 
+    // Push "check in" (29 Oct 2026): pn always, the token only when PushTokenRepo says so
+    val withPush = MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 0, pn = 1, pt = "dEvIcEtOkEn:APA91b", pp = "fcm") }
+    val pushJson = parser.toJsonPlain(withPush)
+    assertTrue(pushJson, pushJson.contains("\"pn\":1"))
+    assertTrue(pushJson, pushJson.contains("\"pt\":\"dEvIcEtOkEn:APA91b\""))
+    assertTrue(pushJson, pushJson.contains("\"pp\":\"fcm\""))
+    val noPush = parser.toJsonPlain(MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 0, pn = 0) })
+    assertTrue(noPush, noPush.contains("\"pn\":0"))
+    assertFalse(noPush, noPush.contains("\"pt\""))
+    assertFalse(noPush, noPush.contains("\"pp\""))
+
     val sparse = MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 1) }
     val sparseJson = parser.toJsonPlain(sparse)
     assertTrue(sparseJson, sparseJson.contains("\"fd\":{\"fg\":1}"))

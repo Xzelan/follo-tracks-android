@@ -99,4 +99,9 @@
     <string name="follo_loc_rationale_title">Location permission</string>
     <string name="follo_loc_rationale_msg">FOLLO Tracks records where you walk during a search so the team can see which ground is covered. Please allow precise location.</string>
     <string name="follo_fix_in_settings">Open app settings</string>
+
+    <!-- Push "check in" (29 Oct 2026): the fallback notification when the phone cannot post by itself -->
+    <string name="follo_msgs_channel">FOLLO messages</string>
+    <string name="follo_msgs_channel_desc">Base camp asking phones to check in during a search</string>
+    <string name="follo_checkin_notif_text">Base camp asks you to open FOLLO Tracks</string>
 </resources>
