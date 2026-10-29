@@ -14,6 +14,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.databinding.DataBindingUtil
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.EntryPoints
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EarlyEntryPoint
@@ -27,10 +30,7 @@ import kotlin.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.conscrypt.Conscrypt
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import com.google.firebase.messaging.FirebaseMessaging
-import org.owntracks.android.data.repos.PushTokenRepo
+import org.owntracks.android.data.repos.PushTokenRegistrar
 import org.owntracks.android.di.CustomBindingComponentBuilder
 import org.owntracks.android.di.CustomBindingEntryPoint
 import org.owntracks.android.geocoding.GeocoderProvider
@@ -73,7 +73,7 @@ open class BaseApp :
 
     fun runThingsOnOtherThreads(): RunThingsOnOtherThreads
 
-    fun pushTokenRepo(): PushTokenRepo
+    fun pushTokenRegistrar(): PushTokenRegistrar
   }
 
   private val preferences by lazy {
@@ -205,9 +205,9 @@ open class BaseApp :
   }
 
   /**
-   * FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, set up in code from the values in
-   * app/follo_firebase.properties (no google-services plugin). Without them the app runs exactly as
-   * before: no token, nothing to receive. The token goes to the server inside the next location
+   * FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, set up in code from the values
+   * in app/follo_firebase.properties (no google-services plugin). Without them the app runs exactly
+   * as before: no token, nothing to receive. The token goes to the server inside the next location
    * post's diagnostics (PushTokenRepo); FolloPushService receives base camp's "check in".
    */
   private fun setUpPush() {
@@ -225,10 +225,11 @@ open class BaseApp :
               .setGcmSenderId(BuildConfig.FIREBASE_SENDER_ID)
               .build(),
       )
-      val repo = EarlyEntryPoints.get(this, ApplicationEntrypoint::class.java).pushTokenRepo()
+      val registrar =
+          EarlyEntryPoints.get(this, ApplicationEntrypoint::class.java).pushTokenRegistrar()
       FirebaseMessaging.getInstance()
           .token
-          .addOnSuccessListener { repo.token = it }
+          .addOnSuccessListener { registrar.onToken(it) }
           .addOnFailureListener { Timber.w(it, "push token not available") }
     } catch (e: Exception) {
       Timber.e(e, "push off: Firebase did not start")
@@ -288,7 +289,8 @@ open class BaseApp :
           } else {
             "Errors"
           }
-      // FOLLO push "check in" (29 Oct 2026): "open FOLLO Tracks" when the phone cannot post by itself
+      // FOLLO push "check in" (29 Oct 2026): "open FOLLO Tracks" when the phone cannot post by
+      // itself
       NotificationChannel(
               FolloCheckInNotification.CHANNEL_ID,
               getString(R.string.follo_msgs_channel),

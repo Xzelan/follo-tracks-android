@@ -17,8 +17,9 @@ apply<EspressoMetadataEmbeddingPlugin>()
 val gmsImplementation: Configuration by configurations.creating
 
 val versionNameValue = "0.1.24" // 29 Oct 2026: push "check in" (FCM)
-// Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code was never uploaded
-val versionBuild = 2
+// Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
+// was never uploaded
+val versionBuild = 3
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
@@ -59,14 +60,27 @@ android {
         localeCount.toString(),
     )
 
-    // FOLLO push "check in" (29 Oct 2026): Firebase is set up in code (no google-services plugin) from
-    // app/follo_firebase.properties; empty values = no Firebase, no push token, everything else as before.
+    // FOLLO push "check in" (29 Oct 2026): Firebase is set up in code (no google-services plugin)
+    // from
+    // app/follo_firebase.properties; empty values = no Firebase, no push token, everything else as
+    // before.
     val firebaseProps =
         Properties().also { props ->
-          file("follo_firebase.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+          file("follo_firebase.properties")
+              .takeIf { it.exists() }
+              ?.inputStream()
+              ?.use { props.load(it) }
         }
-    buildConfigField("String", "FIREBASE_APP_ID", "\"${firebaseProps.getProperty("firebase.appId", "").trim()}\"")
-    buildConfigField("String", "FIREBASE_API_KEY", "\"${firebaseProps.getProperty("firebase.apiKey", "").trim()}\"")
+    buildConfigField(
+        "String",
+        "FIREBASE_APP_ID",
+        "\"${firebaseProps.getProperty("firebase.appId", "").trim()}\"",
+    )
+    buildConfigField(
+        "String",
+        "FIREBASE_API_KEY",
+        "\"${firebaseProps.getProperty("firebase.apiKey", "").trim()}\"",
+    )
     buildConfigField("String", "FIREBASE_PROJECT_ID", "\"follo-tracks-play\"")
     buildConfigField("String", "FIREBASE_SENDER_ID", "\"1035664082070\"")
 
@@ -88,8 +102,12 @@ android {
   androidResources { generateLocaleConfig = true }
 
   // FOLLO: the upload key lives outside the repo (~/.config/follo on the build PC, a secret in CI).
-  // FOLLO_KEYSTORE = path to the .jks, FOLLO_KEYSTORE_PASS = its store + key password, alias "upload".
-  if (!System.getenv("FOLLO_KEYSTORE").isNullOrBlank() && !System.getenv("FOLLO_KEYSTORE_PASS").isNullOrBlank()) {
+  // FOLLO_KEYSTORE = path to the .jks, FOLLO_KEYSTORE_PASS = its store + key password, alias
+  // "upload".
+  if (
+      !System.getenv("FOLLO_KEYSTORE").isNullOrBlank() &&
+          !System.getenv("FOLLO_KEYSTORE_PASS").isNullOrBlank()
+  ) {
     signingConfigs {
       register("release") {
         keyAlias = "upload"
@@ -216,9 +234,7 @@ android {
   productFlavors {
     create("gms") {
       dimension = "locationProvider"
-      dependencies {
-        gmsImplementation(libs.play.services.location)
-      }
+      dependencies { gmsImplementation(libs.play.services.location) }
     }
   }
 }
@@ -252,7 +268,8 @@ dependencies {
   // Connectivity
   implementation(libs.okhttp)
 
-  // FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, initialised in code (App.onCreate)
+  // FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, initialised in code
+  // (App.onCreate)
   implementation(libs.firebase.messaging)
 
   // Utility libraries
@@ -263,7 +280,6 @@ dependencies {
   implementation(libs.bundles.objectbox.migration)
   implementation(libs.kotlin.datetime)
   implementation(libs.kotlinx.serialization.json)
-
 
   // Widget libraries
   implementation(libs.widgets.materialize) { artifact { type = "aar" } }

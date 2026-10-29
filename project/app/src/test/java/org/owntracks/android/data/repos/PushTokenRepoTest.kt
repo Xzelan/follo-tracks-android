@@ -75,6 +75,17 @@ class PushTokenRepoTest {
   }
 
   @Test
+  fun `a token new to the phone says a post is needed, the same one does not`() {
+    val r = repo()
+    assertTrue(r.update("tok1")) // first ever
+    assertFalse(r.update("tok1")) // Firebase repeats it at every start
+    assertTrue(r.update("tok2")) // rotated
+    assertFalse(r.update(""))
+    assertFalse(r.update(null))
+    assertEquals("tok2" to "fcm", r.fdFields()) // and the post that follows carries it
+  }
+
+  @Test
   fun `an empty or same token is ignored`() {
     val r = repo()
     r.token = "tok1"

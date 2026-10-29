@@ -6,7 +6,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
-import org.owntracks.android.data.repos.PushTokenRepo
+import org.owntracks.android.data.repos.PushTokenRegistrar
 import org.owntracks.android.ui.mixins.hasLocationPermission
 import timber.log.Timber
 
@@ -16,14 +16,14 @@ import timber.log.Timber
  * phone takes a fresh fix and posts it (BackgroundService, report type "response"); the server
  * answers Move if it is inside the area or a Basecamp circle. The person sees nothing unless they
  * are started. When the app cannot post by itself it shows one notification asking them to open the
- * app instead. Any other `act` is ignored. Token changes are kept for the next location post.
+ * app instead. Any other `act` is ignored. A new token is posted at once (PushTokenRegistrar).
  */
 @AndroidEntryPoint
 class FolloPushService : FirebaseMessagingService() {
-  @Inject lateinit var pushTokenRepo: PushTokenRepo
+  @Inject lateinit var pushTokenRegistrar: PushTokenRegistrar
 
   override fun onNewToken(token: String) {
-    pushTokenRepo.token = token
+    pushTokenRegistrar.onToken(token)
   }
 
   override fun onMessageReceived(message: RemoteMessage) {

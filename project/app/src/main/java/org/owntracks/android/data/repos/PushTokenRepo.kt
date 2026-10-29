@@ -57,12 +57,21 @@ internal constructor(
   var token: String?
     get() = store.get(KEY_TOKEN)?.takeIf { it.isNotEmpty() }
     set(value) {
-      if (value.isNullOrEmpty()) return
-      if (value != token) {
-        Timber.i("push token ${if (token == null) "received" else "changed"}")
-        store.put(KEY_TOKEN, value)
-      }
+      update(value)
     }
+
+  /**
+   * Keeps a token; true when it is new to this phone (first ever, or rotated) = the server does not
+   * have it yet and a post should follow (PushTokenRegistrar). A standing-by phone makes no post of
+   * its own, so without that post the token would wait for the next check-in (Samsung field test,
+   * 29 Oct 2026: the open check-in went at 2 s, the token arrived at 3-4 s, nothing after).
+   */
+  fun update(value: String?): Boolean {
+    if (value.isNullOrEmpty() || value == token) return false
+    Timber.i("push token ${if (token == null) "received" else "changed"}")
+    store.put(KEY_TOKEN, value)
+    return true
+  }
 
   /** `pt` and `pp` for this post, or null when the token need not be repeated. */
   fun fdFields(): Pair<String, String>? {
