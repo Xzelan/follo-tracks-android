@@ -32,6 +32,7 @@ import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
 import org.owntracks.android.di.CoroutineScopes
+import org.owntracks.android.R
 import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageConfiguration
 import org.owntracks.android.preferences.Preferences
@@ -158,7 +159,26 @@ constructor(
         SetupLink()
 
     data class Bad(val reason: String) : SetupLink()
+
+    /**
+     * A real FOLLO link that gave no setup: [status] = what /appcfg answered, null when nothing came
+     * back (no signal, timeout). 403 = the signature is wrong (old or garbled link, or the secret
+     * was rotated), 410 = the link was turned off with `ft_admin.py block`.
+     */
+    data class Unfetched(val status: Int?) : SetupLink() {
+      /** What to tell the user. Same words as iOS (review B9 add-on, 29 Oct 2026). */
+      val messageRes: Int
+        get() =
+            when (status) {
+              410 -> R.string.follo_setup_off
+              403 -> R.string.follo_setup_stale
+              else -> R.string.follo_setup_unreachable
+            }
+    }
   }
+
+  /** /appcfg answered, but not with 2xx. */
+  private class HttpStatus(val code: Int) : java.io.IOException("HTTP $code")
 
   /**
    * Reads a setup link. Accepted forms:
@@ -194,13 +214,16 @@ constructor(
                         .readTimeout(15, TimeUnit.SECONDS)
                         .build()
                 client.newCall(Request.Builder().url(cfgUrl).build()).execute().use { r ->
-                  if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
+                  if (!r.isSuccessful) throw HttpStatus(r.code)
                   r.body.bytes()
                 }
               }
+            } catch (e: HttpStatus) {
+              Timber.w("FOLLO answered the setup link with HTTP ${e.code}")
+              return SetupLink.Unfetched(e.code)
             } catch (e: Exception) {
               Timber.w(e, "Could not fetch the setup configuration")
-              return SetupLink.Bad("could not fetch configuration: ${e.message}")
+              return SetupLink.Unfetched(null)
             }
           }
           // Scheme, host and path only: the query of a real link carries the signing key (review B5, 28 Oct 2026).

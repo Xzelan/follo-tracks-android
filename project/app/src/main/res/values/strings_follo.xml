@@ -84,6 +84,10 @@
     <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>
     <string name="follo_setup_btn">Set up</string>
     <string name="follo_setup_bad">This isn\'t a FOLLO Tracks setup link.</string>
+    <!-- A real FOLLO link that gave no setup (review B9 add-on, 29 Oct 2026); same words as iOS -->
+    <string name="follo_setup_unreachable">Couldn\'t fetch the setup from FOLLO. Check your signal and tap the link again.</string>
+    <string name="follo_setup_off">This link has been turned off. Ask base camp.</string>
+    <string name="follo_setup_stale">This link doesn\'t work any more. Ask base camp for a new setup link.</string>
     <string name="follo_setup_done">Set up. Sharing starts by itself in search hours.</string>
 
     <string name="follo_disclosure_title">FOLLO Tracks uses your location</string>

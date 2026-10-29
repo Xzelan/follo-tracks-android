@@ -577,6 +577,11 @@ class MainActivity :
           Timber.w("Rejected setup link: ${link.reason}")
           Toast.makeText(this@MainActivity, R.string.follo_setup_bad, Toast.LENGTH_LONG).show()
         }
+        is MainViewModel.SetupLink.Unfetched -> {
+          // A FOLLO link that gave no setup: no signal, turned off (410) or no longer valid (403)
+          Timber.w("Setup link gave no setup: HTTP ${link.status ?: "no response"}")
+          Toast.makeText(this@MainActivity, link.messageRes, Toast.LENGTH_LONG).show()
+        }
         is MainViewModel.SetupLink.Ready -> confirmSetup(link)
       }
     }
