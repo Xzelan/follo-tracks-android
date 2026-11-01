@@ -16,10 +16,10 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.25" // 1 Nov 2026: Edit Circles (wake push + location-free ack), dated Ready line
+val versionNameValue = "0.1.26" // 1 Nov 2026: never a position from outside the search (every fix judged: circles/boundary + the search windows)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
-val versionBuild = 2 // 1 Nov 2026: "no fix on open" (hello instead of a position outside the search)
+val versionBuild = 1
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
