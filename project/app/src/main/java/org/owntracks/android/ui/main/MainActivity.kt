@@ -225,11 +225,15 @@ class MainActivity :
 
     bannerBasePaddingTop = binding.banner.paddingTop
     cardBaseMarginBottom = (binding.card.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
+    val creditBaseMarginBottom = (binding.creditBar.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
     ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
       val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
       binding.banner.updatePadding(top = bannerBasePaddingTop + bars.top)
       binding.card.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
         bottomMargin = cardBaseMarginBottom + bars.bottom
+      }
+      binding.creditBar.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+        bottomMargin = creditBaseMarginBottom + bars.bottom
       }
       windowInsets
     }
@@ -340,6 +344,7 @@ class MainActivity :
           viewModel.tileState.collect { (url, maxZoom) ->
             if (::map.isInitialized && (map.tileProvider.tileSource as? FolloTileSource)?.matches(url, maxZoom) != true) {
               map.setTileSource(FolloTileSource.of(url, maxZoom))
+              showCredit()
               map.invalidate()
             }
           }
@@ -377,6 +382,11 @@ class MainActivity :
       height = if (land) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT
     }
     binding.card.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
+      gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
+    }
+    // the credit stays centred under the card, whichever side the card is on
+    binding.creditBar.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
       width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
       gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
     }
@@ -1109,7 +1119,14 @@ class MainActivity :
     map.overlays.add(myLocationOverlay)
     scaleBar = ScaleBarOverlay(map).apply { setAlignBottom(true); setScaleBarOffset(40, 260) }
     map.overlays.add(scaleBar)
-    map.overlays.add(CopyrightOverlay(this).apply { setAlignBottom(true) })
+    showCredit()
+  }
+
+  /** The current imagery's credit under the card (was osmdroid's CopyrightOverlay in the map's corner). */
+  private fun showCredit() {
+    val text = map.tileProvider.tileSource.copyrightNotice.orEmpty()
+    binding.credit.text = text
+    binding.creditBar.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
   }
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)

@@ -113,4 +113,27 @@
             android:textSize="14sp"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!-- The imagery's credit (its licence wants it visible): centred under the card, at the very bottom
+         (Alex, 1 Nov 2026). The frame follows the card's width and side; MainActivity keeps it above the nav bar. -->
+    <FrameLayout
+        android:id="@+id/creditBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="6dp">
+
+        <TextView
+            android:id="@+id/credit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/bg_follo_credit"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textColor="#E6FFFFFF"
+            android:textSize="11sp" />
+    </FrameLayout>
 </FrameLayout>
