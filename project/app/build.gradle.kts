@@ -19,7 +19,7 @@ val gmsImplementation: Configuration by configurations.creating
 val versionNameValue = "0.1.26" // 1 Nov 2026: never a position from outside the search (every fix judged: circles/boundary + the search windows)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
-val versionBuild = 1
+val versionBuild = 2 // 1 Nov 2026: imagery credit under the card, standby line "Only shares when inside search area and time"
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
