@@ -58,6 +58,20 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * phone's last post did not acknowledge this version (`fd.pv`), so a 10 KB outline is not repeated every 5 s.
    */
   var polyv: String? = null
+  /**
+   * This phone's search windows (1 Nov 2026): [[area, start, end], …] in epoch seconds, recon days included. A fix goes
+   * only while one is open (FolloRules.timedArea). Null = a server older than this build.
+   */
+  var wins: List<List<kotlinx.serialization.json.JsonPrimitive>>? = null
+
+  /** [wins] as windows; malformed rows are skipped. Null when the server sent none. */
+  fun windows(): List<org.owntracks.android.ui.main.FolloRules.Window>? =
+      wins?.mapNotNull { row ->
+        val area = row.getOrNull(0)?.takeIf { it.isString }?.content ?: return@mapNotNull null
+        val start = row.getOrNull(1)?.content?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
+        val end = row.getOrNull(2)?.content?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
+        org.owntracks.android.ui.main.FolloRules.Window(area, start, end)
+      }
   /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
   /**

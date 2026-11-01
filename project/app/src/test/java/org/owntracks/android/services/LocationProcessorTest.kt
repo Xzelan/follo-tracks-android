@@ -4,6 +4,7 @@ import android.content.Context
 import android.location.Location
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -24,6 +25,7 @@ import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.location.geofencing.Latitude
 import org.owntracks.android.location.geofencing.Longitude
 import org.owntracks.android.model.messages.MessageBase
+import org.owntracks.android.model.messages.MessageFollo
 import org.owntracks.android.model.messages.MessageHello
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.net.WifiInfoProvider
@@ -116,8 +118,19 @@ class LocationProcessorTest {
     )
   }
 
-  /** Holds no boundary (status null), so only the held circles count. */
-  private fun noStatus() = mock<FolloStatusRepo> { on { status } doReturn MutableStateFlow<FolloStatusRepo.Status?>(null) }
+  /** No boundary held, and a TEST search window open from 1970 to 2100, so the TEST circle counts (1 Nov 2026). */
+  private fun noStatus() =
+      mock<FolloStatusRepo> {
+        on { status } doReturn
+            MutableStateFlow<FolloStatusRepo.Status?>(
+                FolloStatusRepo.Status(
+                    MessageFollo().apply {
+                      wins = listOf(listOf(JsonPrimitive("TEST"), JsonPrimitive(0), JsonPrimitive(4_102_444_800L)))
+                    },
+                    0L,
+                )
+            )
+      }
 
   /**
    * FOLLO (1 Nov 2026): a fix is only posted inside a held circle or boundary. The mocked fixes here sit at 0,0, so the
@@ -190,6 +203,42 @@ class LocationProcessorTest {
     val hello = captor.firstValue as MessageHello
     assertEquals("out", hello.src)
     verify(preferences, times(3)).monitoring = MonitoringMode.Manual
+  }
+
+  @Test
+  fun `inside the circle but no search window open, the fix is not sent`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val closed =
+        mock<FolloStatusRepo> {
+          on { status } doReturn
+              MutableStateFlow<FolloStatusRepo.Status?>(
+                  FolloStatusRepo.Status(
+                      MessageFollo().apply { wins = listOf(listOf(JsonPrimitive("TEST"), JsonPrimitive(0), JsonPrimitive(1))) },
+                      0L,
+                  )
+              )
+        }
+    val lp =
+        LocationProcessor(
+            messageProcessor,
+            movingPreferences(),
+            LocationRepo(),
+            heldSearchAtZero(),
+            mock<DeviceMetricsProvider>(),
+            mock<WifiInfoProvider>(),
+            this,
+            Dispatchers.Unconfined,
+            SimpleIdlingResource("publishResponseMessageIdlingResource", false),
+            SimpleIdlingResource("mockLocationIdlingResource", false),
+            false,
+            mock<FolloDiagRepo>(),
+            closed,
+        )
+    lp.onLocationChanged(fixAt(0.0, 1_000_000L), MessageLocation.ReportType.DEFAULT) // dead centre of the circle
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(1)).queueMessageForSending(captor.capture())
+    assertTrue(captor.firstValue is MessageHello)
   }
 
   @Test

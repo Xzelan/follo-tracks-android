@@ -159,4 +159,46 @@ class FolloRulesTest {
     assertFalse(FolloRules.outHelloDue(1_000L, 1_000L + 14 * 60_000L))
     assertTrue(FolloRules.outHelloDue(1_000L, 1_000L + 15 * 60_000L))
   }
+
+  // Search windows (1 Nov 2026)
+  private val mv = FolloRules.Circle(-41.1, 146.8, 300.0, "MV")
+  private val cb = FolloRules.Circle(-40.8, 145.1, 300.0, "CB")
+  private val bc = FolloRules.Circle(-41.12, 146.85, 100.0, "Basecamp")
+  private val ring = listOf(-41.0 to 146.0, -41.0 to 147.0, -42.0 to 147.0)
+  private val wins = listOf(FolloRules.Window("MV", 1_793_912_400, 1_793_944_800)) // 6 Nov 08:00-17:00 AEDT
+
+  @Test
+  fun `while a window is open only its area's circles, Basecamp and the boundary count`() {
+    val (cs, b) = FolloRules.timedArea(listOf(mv, cb, bc), ring, null, wins, 1_793_920_000)
+    assertEquals(listOf("MV", "Basecamp"), cs.map { it.area })
+    assertEquals(ring, b)
+  }
+
+  @Test
+  fun `outside the window nothing counts`() {
+    for (t in listOf(1_793_912_399L, 1_793_944_800L, 1_794_000_000L)) {
+      val (cs, b) = FolloRules.timedArea(listOf(mv, bc), ring, null, wins, t)
+      assertTrue("$t", cs.isEmpty())
+      assertNull("$t", b)
+    }
+  }
+
+  @Test
+  fun `no windows known means nothing counts, and an ended boundary is dropped`() {
+    assertTrue(FolloRules.timedArea(listOf(mv, bc), ring, null, null, 1_793_920_000).first.isEmpty())
+    assertNull(FolloRules.timedArea(listOf(mv), ring, 1_793_915_000, wins, 1_793_920_000).second)
+  }
+
+  @Test
+  fun `windows are read from the status element`() {
+    val m =
+        org.owntracks.android.model.Parser()
+            .fromJson(
+                """{"_type":"follo","state":"nosearch","wins":[["MV",1793912400,1793944800],["bad"],["CB",1,2]]}""".toByteArray()
+            ) as org.owntracks.android.model.messages.MessageFollo
+    assertEquals(
+        listOf(FolloRules.Window("MV", 1_793_912_400, 1_793_944_800), FolloRules.Window("CB", 1, 2)),
+        m.windows(),
+    )
+  }
 }

@@ -192,12 +192,24 @@ constructor(
   private suspend fun heldCircles(): List<FolloRules.Circle> =
       withContext(ioDispatcher) { waypointsRepo.getAll() }
           .filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
-          .map { FolloRules.Circle(it.geofenceLatitude.value, it.geofenceLongitude.value, it.geofenceRadius.toDouble()) }
+          .map {
+            FolloRules.Circle(
+                it.geofenceLatitude.value,
+                it.geofenceLongitude.value,
+                it.geofenceRadius.toDouble(),
+                FolloRules.wakeArea(it.description).orEmpty(),
+            )
+          }
 
-  /** Whether [location] is inside any held wake-up circle (search or Basecamp) or the held boundary outline. */
+  /**
+   * Whether [location] is inside a held wake-up circle (search or Basecamp) or the held boundary outline that counts
+   * right now: its area has one of this phone's search windows open (FolloRules.timedArea, 1 Nov 2026).
+   */
   suspend fun insideHeldSearch(location: Location): Boolean {
-    val boundary = folloStatusRepo.status.value?.message?.polyPoints()
-    return FolloRules.insideSearch(location.latitude, location.longitude, heldCircles(), boundary)
+    val msg = folloStatusRepo.status.value?.message
+    val (circles, boundary) =
+        FolloRules.timedArea(heldCircles(), msg?.polyPoints(), msg?.ends, msg?.windows(), System.currentTimeMillis() / 1000)
+    return FolloRules.insideSearch(location.latitude, location.longitude, circles, boundary)
   }
 
   /** When the last hello for a dropped (outside) fix went; null once a position has been posted since. */

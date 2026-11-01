@@ -71,7 +71,32 @@ object FolloRules {
   // The long-press "check in now" is the person's own act and is not judged.
 
   /** A wake-up circle: centre and radius in metres. */
-  data class Circle(val lat: Double, val lon: Double, val r: Double)
+  data class Circle(val lat: Double, val lon: Double, val r: Double, val area: String = "")
+
+  /** One of this phone's search windows (status `wins`, 1 Nov 2026): area code, start and end in epoch seconds. */
+  data class Window(val area: String, val start: Long, val end: Long) {
+    fun openAt(t: Long): Boolean = t >= start && t < end
+  }
+
+  /**
+   * Only what counts NOW (Alex, 1 Nov 2026: "before each post it needs to make sure it's within the time window for
+   * the search"): circles of an area with one of this phone's windows open at [nowS] (a Basecamp circle: any window
+   * open), and the boundary only while a window is open and its own window ([ends]) not over. No windows known (an
+   * older server) ⇒ nothing counts: the fix is not sent and the hello's reply brings the windows.
+   */
+  fun timedArea(
+      circles: List<Circle>,
+      boundary: List<Pair<Double, Double>>?,
+      ends: Long?,
+      wins: List<Window>?,
+      nowS: Long,
+  ): Pair<List<Circle>, List<Pair<Double, Double>>?> {
+    val open = wins.orEmpty().filter { it.openAt(nowS) }
+    if (open.isEmpty()) return emptyList<Circle>() to null
+    val areas = open.map { it.area }.toSet()
+    val ring = if (ends != null && nowS >= ends) null else boundary
+    return circles.filter { it.area in areas || it.area == "Basecamp" } to ring
+  }
 
   /** A circle name a [Circle] is taken from: "FOLLO <AREA> wake <n> …" with a radius above 0. */
   fun isWakeCircle(description: String, radius: Int): Boolean = radius > 0 && wakeArea(description) != null
