@@ -1,6 +1,7 @@
 package org.owntracks.android.ui.main
 
 import org.owntracks.android.model.messages.MessageConfiguration
+import org.owntracks.android.preferences.types.MonitoringMode
 import timber.log.Timber
 
 /** Small FOLLO rules kept free of Android classes so they can be unit-tested (review 21 Oct 2026). */
@@ -115,6 +116,30 @@ object FolloRules {
     /** Still outside after the hello's reply: nothing more leaves the phone. */
     NOTHING,
   }
+
+  // ── Never a position from outside the search (Alex, 1 Nov 2026) ─────────────────────────────
+  // Every position the phone would post is judged first (LocationProcessor.publishLocationMessage): outside every held
+  // circle and the held boundary ⇒ it is NOT sent, the phone stands itself by and says so with a location-free hello.
+
+  /** A hello for a dropped fix at most this often while the phone stays outside (the first one goes at once). */
+  const val OUT_HELLO_EVERY_MS = 15 * 60 * 1000L
+
+  /**
+   * The mode a phone puts itself in when a fix is outside the search — the server's own rule for a phone outside
+   * (helloPost/ingest): standing by (Manual) when it holds circles to wake it, else Significant when it was moving.
+   * null = leave the mode as it is.
+   */
+  fun standbyMode(current: MonitoringMode, holdsCircles: Boolean): MonitoringMode? =
+      when {
+        current == MonitoringMode.Quiet || current == MonitoringMode.Manual -> null
+        holdsCircles -> MonitoringMode.Manual
+        current == MonitoringMode.Move -> MonitoringMode.Significant
+        else -> null
+      }
+
+  /** Whether a dropped fix should be followed by a hello: none yet since the phone was last inside, or long enough ago. */
+  fun outHelloDue(lastOutHelloMs: Long?, nowMs: Long): Boolean =
+      lastOutHelloMs == null || nowMs - lastOutHelloMs >= OUT_HELLO_EVERY_MS
 
   /** What an automatic check-in does with its fix; [secondStep] = judging again after the hello's reply. */
   fun checkInAction(inside: Boolean, secondStep: Boolean): CheckInAction =

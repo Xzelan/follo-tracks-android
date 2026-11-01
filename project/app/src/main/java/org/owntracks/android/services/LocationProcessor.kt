@@ -176,6 +176,8 @@ constructor(
     OPEN("open"),
     PUSH("push"),
     TOKEN("token"),
+    /** A fix the phone would have posted was outside the search: dropped, phone stood by (Alex, 1 Nov 2026). */
+    OUT("out"),
   }
 
   private class PendingHello(val location: Location, val src: CheckInSource)
@@ -187,14 +189,40 @@ constructor(
   private val mutableSecondStepFixRequests = MutableSharedFlow<CheckInSource>(extraBufferCapacity = 4)
   val secondStepFixRequests: SharedFlow<CheckInSource> = mutableSecondStepFixRequests
 
+  private suspend fun heldCircles(): List<FolloRules.Circle> =
+      withContext(ioDispatcher) { waypointsRepo.getAll() }
+          .filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
+          .map { FolloRules.Circle(it.geofenceLatitude.value, it.geofenceLongitude.value, it.geofenceRadius.toDouble()) }
+
   /** Whether [location] is inside any held wake-up circle (search or Basecamp) or the held boundary outline. */
   suspend fun insideHeldSearch(location: Location): Boolean {
-    val circles =
-        withContext(ioDispatcher) { waypointsRepo.getAll() }
-            .filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
-            .map { FolloRules.Circle(it.geofenceLatitude.value, it.geofenceLongitude.value, it.geofenceRadius.toDouble()) }
     val boundary = folloStatusRepo.status.value?.message?.polyPoints()
-    return FolloRules.insideSearch(location.latitude, location.longitude, circles, boundary)
+    return FolloRules.insideSearch(location.latitude, location.longitude, heldCircles(), boundary)
+  }
+
+  /** When the last hello for a dropped (outside) fix went; null once a position has been posted since. */
+  @Volatile private var lastOutHelloMs: Long? = null
+
+  /**
+   * A fix about to be posted is outside the search (Alex, 1 Nov 2026: never a position from outside a search circle).
+   * It is not sent. The phone stands itself by (the server can't: it never sees the fix) and tells the server with a
+   * location-free hello, whose reply brings any circles or boundary just published; its second step posts this fix
+   * only if it is inside one of those.
+   */
+  private suspend fun onOutsideFix(location: Location, trigger: MessageLocation.ReportType, checkIn: Boolean) {
+    val next = FolloRules.standbyMode(preferences.monitoring, heldCircles().isNotEmpty())
+    if (next != null) {
+      Timber.i("fix outside the search ($trigger): not sent, ${preferences.monitoring} -> $next")
+      preferences.monitoring = next
+    } else {
+      Timber.i("fix outside the search ($trigger): not sent")
+    }
+    val now = System.currentTimeMillis()
+    // a check-in's second step has already said hello for this fix
+    if (!checkIn && FolloRules.outHelloDue(lastOutHelloMs, now)) {
+      lastOutHelloMs = now
+      onCheckInLocation(location, CheckInSource.OUT)
+    }
   }
 
   /**
@@ -373,6 +401,14 @@ constructor(
       Timber.d("message suppressed by monitoring settings: manual")
       return Result.failure(Exception("message suppressed by monitoring settings: manual"))
     }
+
+    // FOLLO (Alex, 1 Nov 2026): nothing leaves the phone from outside every held circle and the held boundary —
+    // whatever asked for it (tracking, ping, circle event, base camp's request, the person's own "check in now")
+    if (!insideHeldSearch(location)) {
+      onOutsideFix(location, trigger, checkIn)
+      return Result.failure(Exception("outside the search: not sent"))
+    }
+    lastOutHelloMs = null
 
     val message =
         if (preferences.extendedData) {

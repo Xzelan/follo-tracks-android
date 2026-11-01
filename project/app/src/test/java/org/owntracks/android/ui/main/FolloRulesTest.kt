@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.owntracks.android.model.messages.MessageConfiguration
+import org.owntracks.android.preferences.types.MonitoringMode
 
 class FolloRulesTest {
   @Test
@@ -139,5 +140,23 @@ class FolloRulesTest {
     assertTrue(FolloRules.isWakeCircle("FOLLO Basecamp wake 1", 200))
     assertFalse(FolloRules.isWakeCircle("FOLLO MV wake 3", 0))
     assertFalse(FolloRules.isWakeCircle("Marker: car", 50))
+  }
+
+  // Never a position from outside the search (1 Nov 2026)
+  @Test
+  fun `outside the search the phone stands by as the server would put it`() {
+    assertEquals(MonitoringMode.Manual, FolloRules.standbyMode(MonitoringMode.Move, holdsCircles = true))
+    assertEquals(MonitoringMode.Manual, FolloRules.standbyMode(MonitoringMode.Significant, holdsCircles = true))
+    assertEquals(MonitoringMode.Significant, FolloRules.standbyMode(MonitoringMode.Move, holdsCircles = false))
+    assertNull(FolloRules.standbyMode(MonitoringMode.Significant, holdsCircles = false))
+    assertNull(FolloRules.standbyMode(MonitoringMode.Manual, holdsCircles = true))
+    assertNull(FolloRules.standbyMode(MonitoringMode.Quiet, holdsCircles = true))
+  }
+
+  @Test
+  fun `one hello at once for a dropped fix, then at most every 15 minutes`() {
+    assertTrue(FolloRules.outHelloDue(null, 1_000L))
+    assertFalse(FolloRules.outHelloDue(1_000L, 1_000L + 14 * 60_000L))
+    assertTrue(FolloRules.outHelloDue(1_000L, 1_000L + 15 * 60_000L))
   }
 }
