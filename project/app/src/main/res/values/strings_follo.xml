@@ -2,6 +2,8 @@
 <!-- FOLLO Tracks strings. Wording agreed with Alex 18 Oct 2026 (design canvas). -->
 <resources>
     <string name="follo_brand">FOLLO Tracks</string>
+    <!-- 1 Nov 2026: heading = brand + version + build, e.g. "FOLLO Tracks 0.1.25 (1)" -->
+    <string name="follo_brand_version">%1$s %2$s (%3$d)</string>
 
     <string name="follo_not_setup_title">Not set up yet</string>
     <string name="follo_not_setup_sub">Tap your FOLLO link in Messages</string>
@@ -27,6 +29,9 @@
     <string name="follo_standby_outside_sub">Sharing starts by itself when you enter the area</string>
     <!-- Under Standing by: which searches' wake-up circles the phone holds (Alex 25 Oct 2026; same wording on iOS) -->
     <string name="follo_ready_for">✓ Ready for %1$s</string>
+    <!-- 1 Nov 2026 Edit Circles: appended to the Ready line when the held wake circles carry a date (4th word of
+         their name, yyyy-mm-dd) — shown d-M-yyyy, newest date wins; same wording on iOS -->
+    <string name="follo_ready_update">(%1$s update)</string>
     <!-- 28 Oct 2026 review B11: a check-in needs a fix better than 100 m, which indoors may never come -->
     <string name="follo_ready_none">No search area loaded yet: go outside so the phone can check in</string>
     <string name="follo_standby_nosearch_title">Standing by: no search right now</string>

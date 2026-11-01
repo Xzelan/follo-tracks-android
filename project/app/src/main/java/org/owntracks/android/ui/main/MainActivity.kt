@@ -58,6 +58,7 @@ import org.osmdroid.views.overlay.ScaleBarOverlay
 import org.osmdroid.views.overlay.mylocation.IMyLocationConsumer
 import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.owntracks.android.BuildConfig
 import org.owntracks.android.R
 import org.owntracks.android.data.repos.ContactsRepoChange
 import org.owntracks.android.data.repos.FolloDiagRepo
@@ -216,6 +217,10 @@ class MainActivity :
     folloDiagRepo.noteLaunch("user")
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
+    // 1 Nov 2026: the heading carries the version and build ("FOLLO Tracks 0.1.25 (1)") so a phone's build can be read
+    // off its screen at base camp.
+    binding.brand.text =
+        getString(R.string.follo_brand_version, getString(R.string.follo_brand), BuildConfig.VERSION_NAME, BuildConfig.FOLLO_BUILD)
 
     bannerBasePaddingTop = binding.banner.paddingTop
     cardBaseMarginBottom = (binding.card.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
@@ -431,15 +436,19 @@ class MainActivity :
 
   /** The searches whose wake-up circles this phone holds ("FOLLO MV wake 3" -> MV), for "Ready for MV" (Alex 25 Oct 2026). */
   private var wakeAreas: List<String> = emptyList()
+  /** The newest circles' date the held wake-up circles carry (Edit Circles, 1 Nov 2026), "1-11-2026", or null. */
+  private var wakeUpdate: String? = null
 
   private fun wakeAreaOf(w: WaypointModel): String? =
-      w.description.split(' ').takeIf { w.geofenceRadius > 0 && it.size >= 3 && it[0] == "FOLLO" && it[2] == "wake" }?.get(1)
+      if (w.geofenceRadius > 0) FolloRules.wakeArea(w.description) else null
 
   private fun refreshWakeAreas(all: List<WaypointModel>) {
     drawGeofences(all)
     val areas = all.mapNotNull(::wakeAreaOf).distinct()
-    if (areas != wakeAreas) {
+    val update = FolloRules.readyUpdate(all.filter { wakeAreaOf(it) != null }.map { it.description })
+    if (areas != wakeAreas || update != wakeUpdate) {
       wakeAreas = areas
+      wakeUpdate = update
       render()
     }
   }
@@ -527,14 +536,18 @@ class MainActivity :
     map.invalidate()
   }
 
-  /** "✓ Ready for MV" / "No search area loaded yet", under Standing by; the same wording on iOS. */
+  /**
+   * "✓ Ready for MV" / "No search area loaded yet", under Standing by; the same wording on iOS. Since 1 Nov 2026 (Edit
+   * Circles) " (1-11-2026 update)" follows when the circles carry a date, so base camp can see a phone has the latest.
+   */
   private fun readyLine(): String =
       "\n" +
           when (wakeAreas.size) {
             0 -> getString(R.string.follo_ready_none)
             1 -> getString(R.string.follo_ready_for, wakeAreas[0])
             else -> getString(R.string.follo_ready_for, wakeAreas.dropLast(1).joinToString(", ") + " and " + wakeAreas.last())
-          }
+          } +
+          (if (wakeAreas.isNotEmpty() && wakeUpdate != null) " " + getString(R.string.follo_ready_update, wakeUpdate) else "")
 
   override fun onPause() {
     compass.stop()

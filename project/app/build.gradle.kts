@@ -16,10 +16,10 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.24" // 29 Oct 2026: push "check in" (FCM)
+val versionNameValue = "0.1.25" // 1 Nov 2026: Edit Circles (wake push + location-free ack), dated Ready line
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
-val versionBuild = 4
+val versionBuild = 1
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")
@@ -82,6 +82,9 @@ android {
         "\"${firebaseProps.getProperty("firebase.apiKey", "").trim()}\"",
     )
     buildConfigField("String", "FIREBASE_PROJECT_ID", "\"follo-tracks-play\"")
+    // 1 Nov 2026: the heading shows "FOLLO Tracks <version> (<build>)" so base camp can read a phone's build
+    // off its screen (Alex); versionBuild is not recoverable from versionName.
+    buildConfigField("int", "FOLLO_BUILD", versionBuild.toString())
     buildConfigField("String", "FIREBASE_SENDER_ID", "\"1035664082070\"")
 
     testInstrumentationRunner = "org.owntracks.android.testutils.hilt.CustomTestRunner"

@@ -26,6 +26,7 @@ import org.owntracks.android.model.messages.MessageLwt
 import org.owntracks.android.model.messages.MessageStatus
 import org.owntracks.android.model.messages.MessageTransition
 import org.owntracks.android.model.messages.MessageUnknown
+import org.owntracks.android.model.messages.MessageWakeAck
 import org.owntracks.android.model.messages.MessageWaypoint
 import org.owntracks.android.model.messages.MessageWaypointCollectionSerializer
 import org.owntracks.android.model.messages.MessageWaypoints
@@ -47,6 +48,7 @@ class Parser @Inject constructor() {
       subclass(MessageLwt::class)
       subclass(MessageStatus::class)
       subclass(MessageTransition::class)
+      subclass(MessageWakeAck::class)
       subclass(MessageWaypoint::class)
       subclass(MessageWaypoints::class)
     }

@@ -75,6 +75,7 @@ import org.owntracks.android.location.geofencing.GeofencingRequest
 import org.owntracks.android.location.toLatLng
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageTransition
+import org.owntracks.android.model.messages.MessageWakeAck
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
 import org.owntracks.android.preferences.types.MonitoringMode
@@ -376,6 +377,24 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         // (FolloPushService)
         INTENT_ACTION_FOLLO_CHECKIN -> {
           folloCheckIn()
+          return
+        }
+        // Edit Circles (1 Nov 2026): base camp changed the wake-up circles and the service was not
+        // running (FolloPushService). Only the location-free ack is queued; no position is asked
+        // for. Started as a foreground service because Data Saver cuts a plain background process
+        // off mobile data (FOLLO-L, 1 Nov 2026: every retry "Unable to resolve host"), exactly as
+        // the check-in push does.
+        INTENT_ACTION_FOLLO_WAKEACK -> {
+          messageProcessor.queueMessageForSending(
+              MessageWakeAck.of(
+                  intent.getStringExtra(EXTRA_WAKE_AREA).orEmpty(),
+                  intent.getStringExtra(EXTRA_WAKE_V).orEmpty(),
+                  intent.getStringExtra(EXTRA_WAKE_PV),
+              ),
+          )
+          // The service instance may have outlived a swipe-away (still bound); make sure the
+          // sender loop is alive either way. Idempotent.
+          lifecycleScope.launch { messageProcessor.initializeAndReconnect() }
           return
         }
         // This comes from the [GeofencingBroadcastReceiver]
@@ -978,6 +997,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     // FOLLO push "check in" (29 Oct 2026): FolloPushService (base camp asks) / PushTokenRegistrar
     // (new token)
     const val INTENT_ACTION_FOLLO_CHECKIN = "au.org.follo.tracks.CHECKIN"
+    // Edit Circles (1 Nov 2026): queue the location-free wake ack (FolloPushService)
+    const val INTENT_ACTION_FOLLO_WAKEACK = "au.org.follo.tracks.WAKEACK"
+    const val EXTRA_WAKE_AREA = "area"
+    const val EXTRA_WAKE_V = "v"
+    const val EXTRA_WAKE_PV = "pv"
     private val FOLLO_CHECKIN_FALLBACK = 90.seconds
     private val FOLLO_CHECKIN_LISTEN = 180.seconds
     private const val FOLLO_CHECKIN_MAX_ACC_M = 100f
