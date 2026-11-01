@@ -66,7 +66,8 @@ class FolloPushService : FirebaseMessagingService() {
         ContextCompat.startForegroundService(
             this,
             Intent(this, BackgroundService::class.java)
-                .setAction(BackgroundService.INTENT_ACTION_FOLLO_CHECKIN),
+                .setAction(BackgroundService.INTENT_ACTION_FOLLO_CHECKIN)
+                .putExtra(BackgroundService.EXTRA_CHECKIN_SRC, LocationProcessor.CheckInSource.PUSH.wire),
         )
         return
       } catch (e: Exception) {

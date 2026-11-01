@@ -240,6 +240,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           }
         }
         launch { setupGeofences() }
+        // "No fix on open" (1 Nov 2026): the second judgement after a hello needs a fresh fix
+        launch { locationProcessor.secondStepFixRequests.collect { folloCheckIn(it, secondStep = true) } }
         launch {
           locationRepo.currentPublishedLocation.collect { location ->
             location?.run {
@@ -376,7 +378,10 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         // FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in
         // (FolloPushService)
         INTENT_ACTION_FOLLO_CHECKIN -> {
-          folloCheckIn()
+          folloCheckIn(
+              LocationProcessor.CheckInSource.entries.firstOrNull { it.wire == intent.getStringExtra(EXTRA_CHECKIN_SRC) }
+                  ?: LocationProcessor.CheckInSource.PUSH,
+          )
           return
         }
         // Edit Circles (1 Nov 2026): base camp changed the wake-up circles and the service was not
@@ -698,10 +703,16 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
    * that then arrives is posted and the notification taken down. (Field test 29 Oct 2026: a 30 s
    * single request gave up before the GPS fix came on one Samsung and lost a 15-20 m network fix on
    * the other.)
+   *
+   * "No fix on open" (Alex, 1 Nov 2026): the fix is handed to LocationProcessor.onCheckInLocation
+   * with its [src], which posts it only when the phone is inside a held circle or boundary and a
+   * location-free hello otherwise; [secondStep] = the judgement after a hello's reply. The "open
+   * FOLLO Tracks" fallback notification is only for base camp's asks (push, token), as before.
    */
-  private fun folloCheckIn() {
+  private fun folloCheckIn(src: LocationProcessor.CheckInSource, secondStep: Boolean = false) {
+    val notify = src != LocationProcessor.CheckInSource.OPEN && !secondStep
     if (!requirementsChecker.hasLocationPermissions()) {
-      FolloCheckInNotification.show(this, null)
+      if (notify) FolloCheckInNotification.show(this, null)
       return
     }
     folloCheckInCallback?.let { locationProviderClient.removeLocationUpdates(it) }
@@ -721,11 +732,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
             }
             done = true
             lifecycleScope.launch {
-              val posted = locationProcessor.onCheckInLocation(l)
+              val posted = locationProcessor.onCheckInLocation(l, src, secondStep)
               Timber.i(
-                  "check-in: ${l.accuracy.toInt()} m ${l.provider} fix after ${(SystemClock.elapsedRealtime() - startedAt) / 1000} s, posted=$posted"
+                  "check-in (${src.wire}): ${l.accuracy.toInt()} m ${l.provider} fix after ${(SystemClock.elapsedRealtime() - startedAt) / 1000} s, sent=$posted"
               )
-              if (posted) FolloCheckInNotification.cancel(this@BackgroundService)
+              if (posted && notify) FolloCheckInNotification.cancel(this@BackgroundService)
               stopFolloCheckIn(callback)
             }
           }
@@ -751,7 +762,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     )
     lifecycleScope.launch {
       delay(FOLLO_CHECKIN_FALLBACK)
-      if (!done) {
+      if (!done && notify) {
         Timber.w(
             "check-in: no fix under ${FOLLO_CHECKIN_MAX_ACC_M.toInt()} m within $FOLLO_CHECKIN_FALLBACK, asking the person to open the app"
         )
@@ -997,6 +1008,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     // FOLLO push "check in" (29 Oct 2026): FolloPushService (base camp asks) / PushTokenRegistrar
     // (new token)
     const val INTENT_ACTION_FOLLO_CHECKIN = "au.org.follo.tracks.CHECKIN"
+    /** "No fix on open" (1 Nov 2026): open | push | token (LocationProcessor.CheckInSource.wire); absent = push */
+    const val EXTRA_CHECKIN_SRC = "src"
     // Edit Circles (1 Nov 2026): queue the location-free wake ack (FolloPushService)
     const val INTENT_ACTION_FOLLO_WAKEACK = "au.org.follo.tracks.WAKEACK"
     const val EXTRA_WAKE_AREA = "area"

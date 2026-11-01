@@ -29,6 +29,7 @@ import org.owntracks.android.model.Parser
 import org.owntracks.android.model.messages.MessageBase
 import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.model.messages.MessageCard
+import org.owntracks.android.model.messages.MessageHello
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.net.CALeafCertMatchingHostnameVerifier
 import org.owntracks.android.net.MessageProcessorEndpoint
@@ -155,6 +156,8 @@ class HttpMessageProcessorEndpoint(
                     ),
                 )
                 result.forEach { onMessageReceived(it) }
+                // "No fix on open" (1 Nov 2026): the second judgement follows the hello's reply
+                if (message is MessageHello) messageProcessor.onHelloReplyProcessed()
               }
               return Result.success(Unit)
             } catch (e: IOException) {

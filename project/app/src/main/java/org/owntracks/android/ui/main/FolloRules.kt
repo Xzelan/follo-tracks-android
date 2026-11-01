@@ -61,4 +61,66 @@ object FolloRules {
         val (y, m, d) = WAKE_DATE.find(iso)!!.destructured
         "${d.toInt()}-${m.toInt()}-$y"
       }
+
+  // ── "No fix on open" (Alex, 1 Nov 2026) ─────────────────────────────────────────────────
+  // A check-in that the phone makes by itself (app opened, base camp's check-in push, new push token) only sends a
+  // position when the phone is INSIDE a held wake-up circle (search circles and the Basecamp circle alike) or inside
+  // the held boundary outline. Otherwise it sends a location-free "hello", and once the reply is applied it judges
+  // again with the same fix: inside a newly received circle/boundary => the position goes after all, else nothing.
+  // The long-press "check in now" is the person's own act and is not judged.
+
+  /** A wake-up circle: centre and radius in metres. */
+  data class Circle(val lat: Double, val lon: Double, val r: Double)
+
+  /** A circle name a [Circle] is taken from: "FOLLO <AREA> wake <n> …" with a radius above 0. */
+  fun isWakeCircle(description: String, radius: Int): Boolean = radius > 0 && wakeArea(description) != null
+
+  /** Metres between two points (haversine). */
+  fun distanceM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6_371_008.8
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    return 2 * r * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
+  /** On the edge counts as inside (1 m of slack: the server's and the phone's geometry differ by less). */
+  fun insideCircle(lat: Double, lon: Double, c: Circle): Boolean = distanceM(lat, lon, c.lat, c.lon) <= c.r + 1.0
+
+  /** Ray cast, the same rule the map uses for the edge colour; a ring of fewer than 3 points holds nothing. */
+  fun insideRing(ring: List<Pair<Double, Double>>, lat: Double, lon: Double): Boolean {
+    if (ring.size < 3) return false
+    var c = false
+    var j = ring.size - 1
+    for (i in ring.indices) {
+      val (yi, xi) = ring[i]
+      val (yj, xj) = ring[j]
+      if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) c = !c
+      j = i
+    }
+    return c
+  }
+
+  /** Inside any held wake-up circle or the held boundary (lat, lon pairs). Nothing held => false. */
+  fun insideSearch(lat: Double, lon: Double, circles: List<Circle>, boundary: List<Pair<Double, Double>>?): Boolean =
+      circles.any { insideCircle(lat, lon, it) } || (boundary != null && insideRing(boundary, lat, lon))
+
+  enum class CheckInAction {
+    /** Inside: post the position as before. */
+    POST_FIX,
+    /** Outside or nothing held: post a location-free hello, then judge again when its reply has been applied. */
+    HELLO,
+    /** Still outside after the hello's reply: nothing more leaves the phone. */
+    NOTHING,
+  }
+
+  /** What an automatic check-in does with its fix; [secondStep] = judging again after the hello's reply. */
+  fun checkInAction(inside: Boolean, secondStep: Boolean): CheckInAction =
+      when {
+        inside -> CheckInAction.POST_FIX
+        secondStep -> CheckInAction.NOTHING
+        else -> CheckInAction.HELLO
+      }
 }

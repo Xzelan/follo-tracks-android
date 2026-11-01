@@ -20,6 +20,7 @@ import org.owntracks.android.model.messages.MessageClear
 import org.owntracks.android.model.messages.MessageCmd
 import org.owntracks.android.model.messages.MessageConfiguration
 import org.owntracks.android.model.messages.MessageFollo
+import org.owntracks.android.model.messages.MessageHello
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageLocationDeserializer
 import org.owntracks.android.model.messages.MessageLwt
@@ -44,6 +45,7 @@ class Parser @Inject constructor() {
       subclass(MessageCmd::class)
       subclass(MessageConfiguration::class, MessageConfiguration.MessageConfigurationSerializer)
       subclass(MessageFollo::class)
+      subclass(MessageHello::class)
       subclass(MessageLocation::class, MessageLocationDeserializer)
       subclass(MessageLwt::class)
       subclass(MessageStatus::class)

@@ -68,6 +68,7 @@ import org.owntracks.android.databinding.ActivityMainBinding
 import org.owntracks.android.model.Contact
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.services.BackgroundService
+import org.owntracks.android.services.LocationProcessor
 import org.owntracks.android.support.ContactImageBindingAdapter
 import org.owntracks.android.support.RequirementsChecker
 import org.owntracks.android.ui.NotificationsStash
@@ -176,7 +177,7 @@ class MainActivity :
           {
             preferences.userDeclinedEnableBackgroundLocationPermissions = false
             service?.reInitializeLocationRequests()
-            startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+            openCheckIn()
             render()
           },
           {
@@ -204,7 +205,7 @@ class MainActivity :
       service?.reInitializeLocationRequests()
       // First chance to tell the server this phone exists: the post queued at setup time was
       // dropped because there was no location permission yet.
-      if (preferences.setupCompleted) startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+      if (preferences.setupCompleted) openCheckIn()
     }
     render()
   }
@@ -247,7 +248,7 @@ class MainActivity :
     binding.card.setOnLongClickListener {
       if (requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
         Toast.makeText(this, R.string.follo_send_now, Toast.LENGTH_SHORT).show()
-        pendingCheckIn = true
+        pendingCheckIn = PendingCheckIn.USER
         checkInIfReady()
       }
       true
@@ -417,22 +418,43 @@ class MainActivity :
     // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
     // circles for any search in the next 14 days. Sent once the screen has a fix better than 100 m.
     if (preferences.setupCompleted && requirementsChecker.hasLocationPermissions()) {
-      pendingCheckIn = true
+      pendingCheckIn = PendingCheckIn.OPEN
       checkInIfReady()
     }
     render()
   }
 
   /** A check-in (open or long-press) waiting for a usable fix; the app's own 100 m filter would drop a worse one. */
-  private var pendingCheckIn = false
+  /** A check-in waiting for a good enough fix: USER = the person's long-press (sent as is), OPEN = automatic (judged). */
+  private enum class PendingCheckIn {
+    USER,
+    OPEN,
+  }
+
+  private var pendingCheckIn: PendingCheckIn? = null
 
   private fun checkInIfReady() {
-    if (!pendingCheckIn) return
+    val kind = pendingCheckIn ?: return
     val l = viewModel.currentLocation.value ?: return
     if (l.accuracy >= CHECK_IN_MAX_ACC_M || System.currentTimeMillis() - l.time > CHECK_IN_MAX_AGE_MS) return
-    pendingCheckIn = false
-    startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+    pendingCheckIn = null
+    when (kind) {
+      PendingCheckIn.USER -> startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+      PendingCheckIn.OPEN -> openCheckIn()
+    }
   }
+
+  /**
+   * "No fix on open" (Alex, 1 Nov 2026): every check-in the app makes by itself (coming to the front, set up, a
+   * permission granted) goes through LocationProcessor's judgement: the position is posted only inside a held
+   * wake-up circle or boundary, a location-free hello otherwise (BackgroundService.folloCheckIn, src "open").
+   */
+  private fun openCheckIn() =
+      startService(
+          this,
+          BackgroundService.INTENT_ACTION_FOLLO_CHECKIN,
+          Intent().putExtra(BackgroundService.EXTRA_CHECKIN_SRC, LocationProcessor.CheckInSource.OPEN.wire),
+      )
 
   /** The searches whose wake-up circles this phone holds ("FOLLO MV wake 3" -> MV), for "Ready for MV" (Alex 25 Oct 2026). */
   private var wakeAreas: List<String> = emptyList()
@@ -607,8 +629,8 @@ class MainActivity :
               .setPositiveButton(R.string.follo_setup_btn) { _, _ ->
                 viewModel.applySetup(link.config) {
                   Snackbar.make(binding.root, R.string.follo_setup_done, Snackbar.LENGTH_LONG).show()
-                  // Let the server see this phone straight away, then walk the permissions.
-                  startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
+                  // Let the server see this phone straight away (a hello: no circles held yet), then walk the permissions.
+                  openCheckIn()
                   runPermissionChain()
                   render()
                 }

@@ -19,7 +19,7 @@ val gmsImplementation: Configuration by configurations.creating
 val versionNameValue = "0.1.25" // 1 Nov 2026: Edit Circles (wake push + location-free ack), dated Ready line
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
-val versionBuild = 1
+val versionBuild = 2 // 1 Nov 2026: "no fix on open" (hello instead of a position outside the search)
 
 fun generateVersionCode(versionName: String): Int {
   val parts = versionName.split(".")

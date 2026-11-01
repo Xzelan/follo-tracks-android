@@ -11,9 +11,12 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.owntracks.android.data.repos.FolloDiagRepo
+import org.owntracks.android.data.repos.FolloStatusRepo
 import org.owntracks.android.data.repos.LocationRepo
 import org.owntracks.android.data.waypoints.WaypointModel
 import org.owntracks.android.data.waypoints.WaypointsRepo
@@ -22,6 +25,7 @@ import org.owntracks.android.di.CoroutineScopes
 import org.owntracks.android.location.geofencing.Geofence
 import org.owntracks.android.model.messages.AddMessageStatus
 import org.owntracks.android.model.messages.MessageLocation
+import org.owntracks.android.model.messages.MessageHello
 import org.owntracks.android.model.messages.MessageLocation.Companion.fromLocation
 import org.owntracks.android.model.messages.MessageStatus
 import org.owntracks.android.model.messages.MessageTransition
@@ -33,6 +37,7 @@ import org.owntracks.android.preferences.types.MonitoringMode
 import org.owntracks.android.support.DeviceMetricsProvider
 import org.owntracks.android.support.MessageWaypointCollection
 import org.owntracks.android.test.SimpleIdlingResource
+import org.owntracks.android.ui.main.FolloRules
 import timber.log.Timber
 
 /**
@@ -94,6 +99,7 @@ constructor(
     private val mockLocationIdlingResource: SimpleIdlingResource,
     @param:Named("nativeGeofencingAvailable") private val nativeGeofencingAvailable: Boolean,
     private val folloDiagRepo: FolloDiagRepo,
+    private val folloStatusRepo: FolloStatusRepo,
 ) {
   private fun locationIsWithAccuracyThreshold(l: Location): Boolean =
       preferences.ignoreInaccurateLocations
@@ -133,6 +139,87 @@ constructor(
           false
         }
       }
+
+  // ── "No fix on open" (Alex, 1 Nov 2026) ───────────────────────────────────────────────
+  // An automatic check-in (app open, base camp's check-in push, new push token) sends its fix only
+  // when the phone is inside a held wake-up circle or the held boundary; otherwise a location-free
+  // MessageHello goes, and once its reply has been applied the same fix is judged again (a search
+  // just published, a Basecamp circle just sent) and posted only if it is now inside. The person's
+  // long-press "check in now" does not come through here.
+
+  /** Why an automatic check-in is made; the hello's `src`. */
+  enum class CheckInSource(val wire: String) {
+    OPEN("open"),
+    PUSH("push"),
+    TOKEN("token"),
+  }
+
+  private class PendingHello(val location: Location, val src: CheckInSource)
+
+  /** The fix a hello was sent for, kept for the second judgement after the reply. */
+  @Volatile private var pendingHello: PendingHello? = null
+
+  /** The second judgement needs a fresh fix (the hello's is older than a minute); BackgroundService listens. */
+  private val mutableSecondStepFixRequests = MutableSharedFlow<CheckInSource>(extraBufferCapacity = 4)
+  val secondStepFixRequests: SharedFlow<CheckInSource> = mutableSecondStepFixRequests
+
+  /** Whether [location] is inside any held wake-up circle (search or Basecamp) or the held boundary outline. */
+  suspend fun insideHeldSearch(location: Location): Boolean {
+    val circles =
+        withContext(ioDispatcher) { waypointsRepo.getAll() }
+            .filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
+            .map { FolloRules.Circle(it.geofenceLatitude.value, it.geofenceLongitude.value, it.geofenceRadius.toDouble()) }
+    val boundary = folloStatusRepo.status.value?.message?.polyPoints()
+    return FolloRules.insideSearch(location.latitude, location.longitude, circles, boundary)
+  }
+
+  /**
+   * An automatic check-in's fix (accuracy already under 100 m). Returns true when something was
+   * sent (the position or a hello), false when nothing left the phone.
+   */
+  suspend fun onCheckInLocation(location: Location, src: CheckInSource, secondStep: Boolean = false): Boolean {
+    val inside = insideHeldSearch(location)
+    return when (FolloRules.checkInAction(inside, secondStep)) {
+      FolloRules.CheckInAction.POST_FIX -> {
+        Timber.i("check-in (${src.wire}${if (secondStep) ", 2nd step" else ""}): inside the search, posting the position")
+        onCheckInLocation(location)
+      }
+      FolloRules.CheckInAction.HELLO -> {
+        Timber.i("check-in (${src.wire}): outside the search or nothing held, sending a hello instead of the position")
+        pendingHello = PendingHello(location, src)
+        messageProcessor.queueMessageForSending(
+            MessageHello(
+                src = src.wire,
+                m = preferences.monitoring.value,
+                tid = preferences.tid.toString(),
+                fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+            ),
+        )
+        true
+      }
+      FolloRules.CheckInAction.NOTHING -> {
+        Timber.i("check-in (${src.wire}, 2nd step): still outside, nothing more leaves the phone")
+        false
+      }
+    }
+  }
+
+  /**
+   * The reply to a hello has been applied (MessageProcessor, after its setWaypoints / status). Judge
+   * the hello's fix again if it is still under a minute old, else ask the service for a fresh one.
+   */
+  fun onHelloAnswered() {
+    val pending = pendingHello ?: return
+    pendingHello = null
+    scope.launch {
+      if (System.currentTimeMillis() - pending.location.time <= CHECK_IN_FIX_MAX_AGE_MS) {
+        onCheckInLocation(pending.location, pending.src, secondStep = true)
+      } else {
+        Timber.i("check-in (${pending.src.wire}): hello's fix too old for the 2nd step, asking for a fresh one")
+        mutableSecondStepFixRequests.emit(pending.src)
+      }
+    }
+  }
 
   private suspend fun publishLocationMessage(
       trigger: MessageLocation.ReportType,
@@ -288,6 +375,11 @@ constructor(
       publishResponseMessageIdlingResource.setIdleState(true)
     }
     return Result.success(Unit)
+  }
+
+  companion object {
+    /** A check-in fix older than this is not re-used for the second judgement. */
+    const val CHECK_IN_FIX_MAX_AGE_MS = 60_000L
   }
 
   private val responseMessageTypes =

@@ -9,6 +9,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.services.BackgroundService
+import org.owntracks.android.services.LocationProcessor
 import org.owntracks.android.ui.mixins.hasLocationPermission
 import timber.log.Timber
 
@@ -49,7 +50,9 @@ constructor(
       ContextCompat.startForegroundService(
           context,
           Intent(context, BackgroundService::class.java)
-              .setAction(BackgroundService.INTENT_ACTION_FOLLO_CHECKIN),
+              .setAction(BackgroundService.INTENT_ACTION_FOLLO_CHECKIN)
+              // "No fix on open" (1 Nov 2026): judged; a hello carries the token when the phone is outside
+              .putExtra(BackgroundService.EXTRA_CHECKIN_SRC, LocationProcessor.CheckInSource.TOKEN.wire),
       )
       Timber.i("push token: posting a position so the server gets it")
     } catch (e: Exception) {

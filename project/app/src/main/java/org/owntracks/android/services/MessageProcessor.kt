@@ -763,6 +763,15 @@ constructor(
     locationProcessorLazy.get().publishLocationMessage(trigger)
   }
 
+  /**
+   * "No fix on open" (1 Nov 2026): the HTTP endpoint has handed over every element of a hello's
+   * reply. Queued behind them in the same in-order channel, so it runs once the new waypoints and
+   * status are applied, and the phone can judge its fix against them.
+   */
+  fun onHelloReplyProcessed() {
+    processInOrder { locationProcessorLazy.get().onHelloAnswered() }
+  }
+
   fun stopSendingMessages() {
     Timber.d("Interrupting background sending thread")
     dequeueAndSenderJob?.also { job ->

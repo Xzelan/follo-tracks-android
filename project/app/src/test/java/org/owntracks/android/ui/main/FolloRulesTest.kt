@@ -85,4 +85,59 @@ class FolloRulesTest {
     assertNull(FolloRules.readyUpdate(listOf("FOLLO MV wake 1", "FOLLO CB wake 2", "FOLLO Basecamp wake 1")))
     assertNull(FolloRules.readyUpdate(emptyList()))
   }
+
+  // ── "No fix on open" (Alex, 1 Nov 2026): the judgement ───────────────────────────────────
+
+  private val house = -26.6289 to 153.0355 // Bli Bli
+  private val circles =
+      listOf(FolloRules.Circle(-26.628964, 153.035474, 158.0), FolloRules.Circle(-26.626543, 153.033677, 348.0))
+  private val boundary = listOf(-26.40 to 153.09, -26.40 to 153.11, -26.41 to 153.11, -26.41 to 153.09) // Sunshine Beach box
+
+  @Test
+  fun `inside a held circle means the position is posted`() {
+    assertTrue(FolloRules.insideSearch(house.first, house.second, circles, null))
+    assertEquals(FolloRules.CheckInAction.POST_FIX, FolloRules.checkInAction(true, secondStep = false))
+  }
+
+  @Test
+  fun `inside the boundary only, with no circle around, still counts as inside`() {
+    assertTrue(FolloRules.insideSearch(-26.405, 153.10, circles, boundary))
+    assertFalse(FolloRules.insideSearch(-26.405, 153.10, circles, null))
+  }
+
+  @Test
+  fun `outside every circle and the boundary means a hello instead of the position`() {
+    assertFalse(FolloRules.insideSearch(-26.50, 153.05, circles, boundary))
+    assertEquals(FolloRules.CheckInAction.HELLO, FolloRules.checkInAction(false, secondStep = false))
+  }
+
+  @Test
+  fun `nothing held at all means a hello`() {
+    assertFalse(FolloRules.insideSearch(house.first, house.second, emptyList(), null))
+    assertFalse(FolloRules.insideSearch(house.first, house.second, emptyList(), emptyList()))
+    assertEquals(FolloRules.CheckInAction.HELLO, FolloRules.checkInAction(false, secondStep = false))
+  }
+
+  @Test
+  fun `a point on the circle's edge counts as inside`() {
+    val c = FolloRules.Circle(-26.628964, 153.035474, 150.0)
+    val edgeLat = c.lat + 150.0 / 111_195.0 // 150 m north along the meridian
+    assertTrue(FolloRules.insideCircle(edgeLat, c.lon, c))
+    assertTrue(FolloRules.distanceM(c.lat, c.lon, edgeLat, c.lon) in 149.0..151.0)
+    assertFalse(FolloRules.insideCircle(c.lat + 160.0 / 111_195.0, c.lon, c))
+  }
+
+  @Test
+  fun `the second step posts only when the phone is inside the newly received circles or boundary`() {
+    assertEquals(FolloRules.CheckInAction.POST_FIX, FolloRules.checkInAction(true, secondStep = true))
+    assertEquals(FolloRules.CheckInAction.NOTHING, FolloRules.checkInAction(false, secondStep = true))
+  }
+
+  @Test
+  fun `only FOLLO wake circles with a radius are judged, markers are not`() {
+    assertTrue(FolloRules.isWakeCircle("FOLLO MV wake 3 2026-11-01", 150))
+    assertTrue(FolloRules.isWakeCircle("FOLLO Basecamp wake 1", 200))
+    assertFalse(FolloRules.isWakeCircle("FOLLO MV wake 3", 0))
+    assertFalse(FolloRules.isWakeCircle("Marker: car", 50))
+  }
 }
