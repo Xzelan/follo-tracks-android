@@ -43,6 +43,10 @@ fun Location.toLatLng() = LatLng(latitude, longitude)
 
 fun MessageLocation.toLatLng() = LatLng(latitude, longitude)
 
-fun MessageTransition.toLatLng() = LatLng(latitude, longitude)
+fun MessageTransition.toLatLng(): LatLng? {
+  val lat = latitude ?: return null
+  val lon = longitude ?: return null
+  return LatLng(lat, lon)
+}
 
 fun Double.roundForDisplay(): String = BigDecimal(this).setScale(4, RoundingMode.HALF_UP).toString()

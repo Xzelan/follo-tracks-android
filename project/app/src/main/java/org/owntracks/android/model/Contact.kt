@@ -72,12 +72,13 @@ class Contact(id: String) : BaseObservable() {
 
   fun setLocationFromMessageTransition(messageLocation: MessageTransition): Boolean {
     if (locationAccuracy > messageLocation.timestamp) return false
+    val at = messageLocation.toLatLng() ?: return false // FOLLO: a transition without a position moves no one
     locationTimestamp = messageLocation.timestamp
-    if (latLng != messageLocation.toLatLng()) {
+    if (latLng != at) {
       Timber.v("Contact ${this.id} has moved to $latLng")
-      latLng = messageLocation.toLatLng()
+      latLng = at
     }
-    locationAccuracy = messageLocation.accuracy
+    locationAccuracy = messageLocation.accuracy ?: 0
     return true
   }
 

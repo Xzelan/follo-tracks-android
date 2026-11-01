@@ -50,16 +50,14 @@ class MessageTransition(
 
   @SerialName("wtst") var waypointTimestamp: Long = 0
 
-  @SerialName("acc") var accuracy = 0
+  // FOLLO (Alex, 1 Nov 2026: never a position from outside a search circle): this phone's own transitions carry NO
+  // position (LocationProcessor.publishTransitionMessage leaves these null, so they are not written at all). An
+  // incoming one may still carry them (upstream format); null = not given, not the equator.
+  @SerialName("acc") var accuracy: Int? = null
 
-  // Always written out, even at their 0.0 defaults: the equator and prime meridian are real places.
-  @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.ALWAYS)
-  @SerialName("lon")
-  var longitude = 0.0
+  @SerialName("lon") var longitude: Double? = null
 
-  @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.ALWAYS)
-  @SerialName("lat")
-  var latitude = 0.0
+  @SerialName("lat") var latitude: Double? = null
 
   override fun annotateFromPreferences(preferences: Preferences) {
     topic = preferences.pubTopicEvents

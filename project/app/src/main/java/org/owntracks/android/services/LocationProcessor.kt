@@ -4,7 +4,6 @@ import android.location.Location
 import android.os.Build
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -39,6 +38,31 @@ import org.owntracks.android.support.MessageWaypointCollection
 import org.owntracks.android.test.SimpleIdlingResource
 import org.owntracks.android.ui.main.FolloRules
 import timber.log.Timber
+
+/**
+ * FOLLO (Alex, 1 Nov 2026: never a position from outside a search circle): this phone's own transition, without any
+ * position — no lat, lon or acc, and tst = when it was noticed, not the time of a fix. A leave is reported once the
+ * phone is already out, so the fix behind it is from outside the search. The server never used either.
+ */
+internal fun folloTransitionMessage(
+    transition: Int,
+    trigger: String,
+    tid: String,
+    waypointTst: Long,
+    description: String?,
+    nowEpochSeconds: Long,
+): MessageTransition =
+    MessageTransition().apply {
+      setTransition(transition)
+      this.trigger = trigger
+      trackerId = tid
+      timestamp = nowEpochSeconds
+      waypointTimestamp = waypointTst
+      this.description = description
+    }
+
+/** FOLLO (1 Nov 2026): a location post follows an enter, never a leave. */
+internal fun folloSendsFixAfter(transition: Int): Boolean = transition != Geofence.GEOFENCE_TRANSITION_EXIT
 
 /**
  * A waypoint transition candidate that has been observed but not yet committed, because it hasn't
@@ -451,8 +475,11 @@ constructor(
         if (preferences.monitoring === MonitoringMode.Quiet) {
           Timber.d("message suppressed by monitoring settings: ${preferences.monitoring}")
         } else {
-          publishTransitionMessage(waypointModel, location, transition, trigger)
-          if (trigger == MessageTransition.TRIGGER_CIRCULAR) {
+          publishTransitionMessage(waypointModel, transition, trigger)
+          // FOLLO (1 Nov 2026): no location post after a LEAVE — the geofence API reports an exit once the phone is
+          // out, so its triggering fix is from outside the search. An enter still posts (its reply puts the phone in
+          // Move, and the fix is inside the circle that was entered).
+          if (trigger == MessageTransition.TRIGGER_CIRCULAR && folloSendsFixAfter(transition)) {
             publishLocationMessage(MessageLocation.ReportType.CIRCULAR, location)
           }
         }
@@ -466,22 +493,18 @@ constructor(
 
   private fun publishTransitionMessage(
       waypointModel: WaypointModel,
-      triggeringLocation: Location,
       transition: Int,
       trigger: String,
   ) {
     messageProcessor.queueMessageForSending(
-        MessageTransition().apply {
-          setTransition(transition)
-          this.trigger = trigger
-          trackerId = preferences.tid.toString()
-          latitude = triggeringLocation.latitude
-          longitude = triggeringLocation.longitude
-          accuracy = triggeringLocation.accuracy.roundToInt()
-          timestamp = TimeUnit.MILLISECONDS.toSeconds(triggeringLocation.time)
-          waypointTimestamp = waypointModel.tst.epochSecond
-          description = waypointModel.description
-        }
+        folloTransitionMessage(
+            transition,
+            trigger,
+            preferences.tid.toString(),
+            waypointModel.tst.epochSecond,
+            waypointModel.description,
+            Instant.now().epochSecond,
+        )
     )
   }
 
