@@ -449,12 +449,20 @@ class MainActivity :
    * permission granted) goes through LocationProcessor's judgement: the position is posted only inside a held
    * wake-up circle or boundary, a location-free hello otherwise (BackgroundService.folloCheckIn, src "open").
    */
-  private fun openCheckIn() =
-      startService(
-          this,
-          BackgroundService.INTENT_ACTION_FOLLO_CHECKIN,
-          Intent().putExtra(BackgroundService.EXTRA_CHECKIN_SRC, LocationProcessor.CheckInSource.OPEN.wire),
-      )
+  private fun openCheckIn() {
+    // Coming to the front and the permission chain's "granted" callback both land here within a second of each
+    // other (Samsung test 1 Nov 2026: two hellos per open); one automatic check-in per 10 s is plenty.
+    val now = SystemClock.elapsedRealtime()
+    if (now - lastOpenCheckInAt < OPEN_CHECK_IN_DEDUPE_MS) return
+    lastOpenCheckInAt = now
+    startService(
+        this,
+        BackgroundService.INTENT_ACTION_FOLLO_CHECKIN,
+        Intent().putExtra(BackgroundService.EXTRA_CHECKIN_SRC, LocationProcessor.CheckInSource.OPEN.wire),
+    )
+  }
+
+  private var lastOpenCheckInAt = -OPEN_CHECK_IN_DEDUPE_MS
 
   /** The searches whose wake-up circles this phone holds ("FOLLO MV wake 3" -> MV), for "Ready for MV" (Alex 25 Oct 2026). */
   private var wakeAreas: List<String> = emptyList()
@@ -1768,6 +1776,7 @@ class MainActivity :
     // A check-in goes with a fix better than this (the app's own ignoreInaccurateLocations is 100) and no older than this
     private const val CHECK_IN_MAX_ACC_M = 100f
     private const val CHECK_IN_MAX_AGE_MS = 60_000L
+    private const val OPEN_CHECK_IN_DEDUPE_MS = 10_000L
     private const val PAIR_M = 20.0
     private const val PAIR_TOL_M = 1.0
     private const val NO_SIGNAL_AFTER_MS = 10_000L
