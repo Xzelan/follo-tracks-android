@@ -1507,12 +1507,16 @@ class MainActivity :
   /** The search area's storage box from the server: the line where sharing starts and stops. */
   private var drawnBox: String? = null
 
+  /** The area's fill polygon and its edge lines (tracks go on top of both). */
+  private fun isAreaLayer(o: org.osmdroid.views.overlay.Overlay) =
+      (o is Polygon && o.id == AREA_ID) || (o is Polyline && o.id == AREA_EDGE_ID)
+
   private fun drawAreaBox(status: org.owntracks.android.model.messages.MessageFollo?) {
     if (!::map.isInitialized) return
     val key = (status?.poly?.toString() ?: status?.box)?.takeIf { status?.ends?.let { System.currentTimeMillis() / 1000 >= it } != true }
     if (key == drawnBox) return // the same box arrives with every reply; redrawing it each time flickers
     drawnBox = key
-    map.overlays.removeAll { (it is Polygon && it.id == AREA_ID) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
+    map.overlays.removeAll { isAreaLayer(it) || (it is Marker && it.id == AREA_ID + LABEL_SUFFIX) }
     drawnAreaPts = null
     val b = status?.boxBounds()
     val ring = status?.polyPoints()
@@ -1530,11 +1534,28 @@ class MainActivity :
             id = AREA_ID
             points = pts
             fillPaint.color = getColor(R.color.follo_area_fill)
-            outlinePaint.color = getColor(R.color.follo_area)
-            outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+            // 3 Nov 2026 (Alex): the edge is drawn by the lines below, not the polygon's own outline, which drew the
+            // zero-width links between separate groups of circles as stray lines (FolloRingEdges)
+            outlinePaint.color = Color.TRANSPARENT
+            outlinePaint.strokeWidth = 0f
             infoWindow = null
           },
       )
+      val edges = ring?.let { org.owntracks.android.model.FolloRingEdges.pieces(it) }?.map { run -> run.map { (la, lo) -> GeoPoint(la, lo) } } ?: listOf(pts)
+      edges.forEachIndexed { k, run ->
+        map.overlays.add(
+            1 + k,
+            Polyline(map).apply {
+              id = AREA_EDGE_ID
+              setPoints(run)
+              outlinePaint.color = getColor(R.color.follo_area)
+              outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+              outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND   // runs meet end to end where a link was
+              outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+              infoWindow = null
+            },
+        )
+      }
       map.overlays.add(
           Marker(map).apply {
             id = AREA_ID + LABEL_SUFFIX
@@ -1585,7 +1606,7 @@ class MainActivity :
   }
 
   private fun aboveAreaAndTrack(): Int =
-      map.overlays.indexOfLast { (it is Polygon && it.id == AREA_ID) || (it is Polyline && it.id == TRACK_ID) } + 1
+      map.overlays.indexOfLast { isAreaLayer(it) || (it is Polyline && it.id == TRACK_ID) } + 1
 
   private var drawnTrackSerial = -1
   /** The segment being walked right now; new points are appended to it. */
@@ -1615,7 +1636,7 @@ class MainActivity :
       val lp = u.last!!
       val p = GeoPoint(lp.lat, lp.lon)
       if (u.newSegment) {
-        val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
+        val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
         trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
       } else trackTail!!.addPoint(p)
       map.invalidate()
@@ -1623,7 +1644,7 @@ class MainActivity :
     }
     map.overlays.removeAll { it is Polyline && it.id == TRACK_ID }
     trackTail = null
-    val at = map.overlays.indexOfLast { it is Polygon && it.id == AREA_ID } + 1
+    val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
     val points = viewModel.trackSnapshot()
     val segments = viewModel.trackSegments(points)
     segments.reversed().forEach { seg -> map.overlays.add(at, trackLine(seg.map { GeoPoint(it.lat, it.lon) })) }
@@ -1792,6 +1813,7 @@ class MainActivity :
   companion object {
     private const val REGION_PREFIX = "region-"
     private const val AREA_ID = "follo-area"
+    private const val AREA_EDGE_ID = "follo-area-edge"
     private const val GEOFENCE_ID = "follo-geofence"
     private const val PAIR_ID = "follo-pair"
     private const val TRACK_ID = "follo-track"

@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.30" // 2 Nov 2026: circle alerts at once + near-circle watch (100 m, 30 s, judged on the phone only)
+val versionNameValue = "0.1.31" // 3 Nov 2026: area edge drawn without the zero-width links between separate circle groups
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026
