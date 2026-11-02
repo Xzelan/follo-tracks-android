@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.28" // 2 Nov 2026: the circle is the line (no 1 m slack); edge hold (2 min / 50 m)
+val versionNameValue = "0.1.29" // 2 Nov 2026: other people's dots half size (24 dp)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026

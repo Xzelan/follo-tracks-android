@@ -27,6 +27,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.res.ResourcesCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.scale
 import androidx.core.view.ViewCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.WindowInsetsCompat
@@ -1746,6 +1747,10 @@ class MainActivity :
     map.invalidate()
   }
 
+  /** Other people's dots are half the size of the cached 48 dp picture (Alex, 2 Nov 2026). */
+  private fun contactIcon(bitmap: android.graphics.Bitmap) =
+      bitmap.scale((bitmap.width / 2).coerceAtLeast(1), (bitmap.height / 2).coerceAtLeast(1)).toDrawable(resources)
+
   private fun updateContactMarker(contact: Contact) {
     val latLng = contact.latLng ?: return
     if (!isFresh(contact)) return
@@ -1763,7 +1768,7 @@ class MainActivity :
         if (!moved && !newPicture) return@launch
         if (moved) existing.position = point
         if (newPicture) {
-          existing.icon = bitmap.toDrawable(resources)
+          existing.icon = contactIcon(bitmap)
           existing.relatedObject = bitmap
         }
       } else if (!isDestroyed) {
@@ -1771,7 +1776,7 @@ class MainActivity :
             Marker(map).apply {
               this.id = id
               position = point
-              icon = bitmap.toDrawable(resources)
+              icon = contactIcon(bitmap)
               relatedObject = bitmap
               title = contact.displayName
               setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
