@@ -112,8 +112,11 @@ object FolloRules {
     return 2 * r * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   }
 
-  /** On the edge counts as inside (1 m of slack: the server's and the phone's geometry differ by less). */
-  fun insideCircle(lat: Double, lon: Double, c: Circle): Boolean = distanceM(lat, lon, c.lat, c.lon) <= c.r + 1.0
+  /**
+   * On the edge counts as inside. No slack (2 Nov 2026, Alex: "just use the circles (aka green lines)"): the server
+   * judges the circles with the same haversine on the same sphere (R 6371008.8 m), so the phone's line is the server's.
+   */
+  fun insideCircle(lat: Double, lon: Double, c: Circle): Boolean = distanceM(lat, lon, c.lat, c.lon) <= c.r
 
   /** Ray cast, the same rule the map uses for the edge colour; a ring of fewer than 3 points holds nothing. */
   fun insideRing(ring: List<Pair<Double, Double>>, lat: Double, lon: Double): Boolean {
@@ -184,7 +187,7 @@ object FolloRules {
   fun outsideByM(lat: Double, lon: Double, circles: List<Circle>, boundary: List<Pair<Double, Double>>?): Double {
     if (insideSearch(lat, lon, circles, boundary)) return 0.0
     var best = Double.POSITIVE_INFINITY
-    for (c in circles) best = minOf(best, distanceM(lat, lon, c.lat, c.lon) - c.r - 1.0)
+    for (c in circles) best = minOf(best, distanceM(lat, lon, c.lat, c.lon) - c.r)
     if (boundary != null && boundary.size >= 2) {
       val ky = 111_320.0
       val kx = ky * Math.cos(Math.toRadians(lat))

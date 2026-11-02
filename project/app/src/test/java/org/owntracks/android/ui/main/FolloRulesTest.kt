@@ -122,7 +122,7 @@ class FolloRulesTest {
   @Test
   fun `a point on the circle's edge counts as inside`() {
     val c = FolloRules.Circle(-26.628964, 153.035474, 150.0)
-    val edgeLat = c.lat + 150.0 / 111_195.0 // 150 m north along the meridian
+    val edgeLat = c.lat + 149.999 / 111_195.08 // a millimetre inside the 150 m edge, north along the meridian
     assertTrue(FolloRules.insideCircle(edgeLat, c.lon, c))
     assertTrue(FolloRules.distanceM(c.lat, c.lon, edgeLat, c.lon) in 149.0..151.0)
     assertFalse(FolloRules.insideCircle(c.lat + 160.0 / 111_195.0, c.lon, c))
@@ -224,10 +224,21 @@ class FolloRulesTest {
     val c = FolloRules.Circle(-26.627339, 153.036445, 100.0, "TEST")
     val east = 100.0 / (111_195.0 * Math.cos(Math.toRadians(-26.627339)))
     assertEquals(0.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 0.97, listOf(c), null), 0.0)
-    assertEquals(2.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.03, listOf(c), null), 0.6)
-    assertEquals(59.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.6, listOf(c), null), 1.0)
+    assertEquals(3.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.03, listOf(c), null), 0.6)
+    assertEquals(60.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.6, listOf(c), null), 1.0)
     assertEquals(Double.POSITIVE_INFINITY, FolloRules.outsideByM(-26.6, 153.0, emptyList(), null), 0.0)
     val ring = listOf(-26.63 to 153.03, -26.63 to 153.04, -26.62 to 153.04, -26.62 to 153.03)
     assertEquals(30.0, FolloRules.outsideByM(-26.63 - 30 / 111_320.0, 153.035, emptyList(), ring), 0.5)
+  }
+
+  // 2 Nov 2026 (Alex): the circle IS the line — no slack beyond it
+  @Test
+  fun `a fix 0_3 m outside a circle is outside, 0_3 m inside is inside`() {
+    val c = FolloRules.Circle(-41.125442, 146.846931, 1562.0, "MV")
+    val k = 6_371_008.8 * Math.PI / 180
+    assertTrue(FolloRules.insideCircle(c.lat + 1561.7 / k, c.lon, c))
+    assertFalse(FolloRules.insideCircle(c.lat + 1562.3 / k, c.lon, c))
+    assertTrue(FolloRules.insideCircle(c.lat, c.lon + 1561.7 / (k * Math.cos(Math.toRadians(c.lat))), c))
+    assertFalse(FolloRules.insideCircle(c.lat, c.lon + 1562.3 / (k * Math.cos(Math.toRadians(c.lat))), c))
   }
 }
