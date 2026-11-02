@@ -201,4 +201,33 @@ class FolloRulesTest {
         m.windows(),
     )
   }
+
+  // Edge hold (Alex's walk 2 Nov 2026): 2 minutes or 50 m beyond the edge, whichever first; only in Move
+  @Test
+  fun `a fix just outside is held in Move until 2 minutes or 50 m`() {
+    val t0 = 1_793_606_000_000L
+    val move = MonitoringMode.Move
+    assertEquals(FolloRules.GateVerdict.SHARE, FolloRules.gateVerdict(0.0, null, t0, move))
+    assertEquals(FolloRules.GateVerdict.HOLD, FolloRules.gateVerdict(2.0, t0, t0, move))
+    assertEquals(FolloRules.GateVerdict.HOLD, FolloRules.gateVerdict(49.0, t0, t0 + 119_000L, move))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(50.0, t0, t0 + 10_000L, move))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(3.0, t0, t0 + 120_000L, move))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(2.0, t0, t0, MonitoringMode.Manual))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(2.0, t0, t0, MonitoringMode.Significant))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(2.0, t0, t0, move, checkIn = true))
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdict(Double.POSITIVE_INFINITY, t0, t0, move))
+  }
+
+  @Test
+  fun `metres outside are measured to the nearest edge`() {
+    // the TEST circle Alex skirted on 2 Nov 2026: r 100 m, east edge on the road
+    val c = FolloRules.Circle(-26.627339, 153.036445, 100.0, "TEST")
+    val east = 100.0 / (111_195.0 * Math.cos(Math.toRadians(-26.627339)))
+    assertEquals(0.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 0.97, listOf(c), null), 0.0)
+    assertEquals(2.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.03, listOf(c), null), 0.6)
+    assertEquals(59.0, FolloRules.outsideByM(-26.627339, 153.036445 + east * 1.6, listOf(c), null), 1.0)
+    assertEquals(Double.POSITIVE_INFINITY, FolloRules.outsideByM(-26.6, 153.0, emptyList(), null), 0.0)
+    val ring = listOf(-26.63 to 153.03, -26.63 to 153.04, -26.62 to 153.04, -26.62 to 153.03)
+    assertEquals(30.0, FolloRules.outsideByM(-26.63 - 30 / 111_320.0, 153.035, emptyList(), ring), 0.5)
+  }
 }

@@ -10,6 +10,8 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
@@ -205,11 +207,80 @@ constructor(
    * Whether [location] is inside a held wake-up circle (search or Basecamp) or the held boundary outline that counts
    * right now: its area has one of this phone's search windows open (FolloRules.timedArea, 1 Nov 2026).
    */
-  suspend fun insideHeldSearch(location: Location): Boolean {
+  suspend fun insideHeldSearch(location: Location): Boolean = outsideHeldSearchM(location) <= 0.0
+
+  /** Metres beyond what counts right now (0 = inside, infinity = nothing counts). */
+  private suspend fun outsideHeldSearchM(location: Location): Double {
     val msg = folloStatusRepo.status.value?.message
     val (circles, boundary) =
         FolloRules.timedArea(heldCircles(), msg?.polyPoints(), msg?.ends, msg?.windows(), System.currentTimeMillis() / 1000)
-    return FolloRules.insideSearch(location.latitude, location.longitude, circles, boundary)
+    return FolloRules.outsideByM(location.latitude, location.longitude, circles, boundary)
+  }
+
+  // ── Edge hold (Alex's walk 2 Nov 2026, FolloRules.gateVerdict) ────────────────────────────────
+  private class HeldFix(val location: Location, val trigger: MessageLocation.ReportType)
+
+  private val heldLock = Any()
+  private val heldFixes = ArrayList<HeldFix>()
+  @Volatile private var outsideSinceMs: Long? = null
+  private var holdTimer: Job? = null
+
+  private fun dropHeld() {
+    synchronized(heldLock) {
+      heldFixes.clear()
+      outsideSinceMs = null
+      holdTimer?.cancel()
+      holdTimer = null
+    }
+  }
+
+  /** Judge a fix about to be posted; HOLD keeps it on the phone (tracking goes on), STANDBY drops every held fix. */
+  private suspend fun judgeFix(location: Location, trigger: MessageLocation.ReportType, checkIn: Boolean): FolloRules.GateVerdict {
+    val beyond = outsideHeldSearchM(location)
+    val now = System.currentTimeMillis()
+    val verdict =
+        synchronized(heldLock) {
+          if (beyond > 0.0 && outsideSinceMs == null) outsideSinceMs = now
+          FolloRules.gateVerdict(beyond, outsideSinceMs, now, preferences.monitoring, checkIn).also { v ->
+            when (v) {
+              FolloRules.GateVerdict.SHARE -> {
+                outsideSinceMs = null
+                holdTimer?.cancel()
+                holdTimer = null
+              }
+              FolloRules.GateVerdict.HOLD -> {
+                heldFixes.add(HeldFix(location, trigger))
+                while (heldFixes.size > FolloRules.HOLD_CAP) heldFixes.removeAt(0)
+                if (holdTimer == null) {
+                  val wait = FolloRules.HOLD_FOR_MS - (now - (outsideSinceMs ?: now))
+                  holdTimer = scope.launch { delay(wait.coerceAtLeast(1_000L)); holdTimeUp() }
+                }
+              }
+              FolloRules.GateVerdict.STANDBY -> Unit
+            }
+          }
+        }
+    if (verdict == FolloRules.GateVerdict.STANDBY) dropHeld()
+    return verdict
+  }
+
+  /** Two minutes just outside with no fix since to decide it (standing still): drop and stand by. */
+  private suspend fun holdTimeUp() {
+    val last =
+        synchronized(heldLock) {
+          holdTimer = null
+          val since = outsideSinceMs ?: return
+          if (System.currentTimeMillis() - since < FolloRules.HOLD_FOR_MS - 1_000L) return
+          heldFixes.lastOrNull()
+        }
+    dropHeld()
+    if (last != null) onOutsideFix(last.location, last.trigger, checkIn = false)
+  }
+
+  /** After a SHARE: the held fixes inside what counts NOW, oldest first; the rest are dropped. */
+  private suspend fun takeHeldInside(): List<HeldFix> {
+    val held = synchronized(heldLock) { heldFixes.toList().also { heldFixes.clear() } }
+    return held.filter { outsideHeldSearchM(it.location) <= 0.0 }
   }
 
   /** When the last hello for a dropped (outside) fix went; null once a position has been posted since. */
@@ -415,13 +486,33 @@ constructor(
     }
 
     // FOLLO (Alex, 1 Nov 2026): nothing leaves the phone from outside every held circle and the held boundary —
-    // whatever asked for it (tracking, ping, circle event, base camp's request, the person's own "check in now")
-    if (!insideHeldSearch(location)) {
-      onOutsideFix(location, trigger, checkIn)
-      return Result.failure(Exception("outside the search: not sent"))
+    // whatever asked for it (tracking, ping, circle event, base camp's request, the person's own "check in now").
+    // Edge hold (Alex, 2 Nov 2026): in Move a fix just outside is kept on the phone and tracking goes on.
+    when (judgeFix(location, trigger, checkIn)) {
+      FolloRules.GateVerdict.HOLD -> {
+        Timber.i("fix just outside the search ($trigger): held on the phone")
+        return Result.failure(Exception("just outside the search: held on the phone"))
+      }
+      FolloRules.GateVerdict.STANDBY -> {
+        onOutsideFix(location, trigger, checkIn)
+        return Result.failure(Exception("outside the search: not sent"))
+      }
+      FolloRules.GateVerdict.SHARE -> Unit
     }
     lastOutHelloMs = null
+    for (h in takeHeldInside()) {
+      Timber.i("held fix ${h.location.time} is inside after all: sending it")
+      queueLocation(h.trigger, h.location, loadedWaypoints)
+    }
+    queueLocation(trigger, location, loadedWaypoints)
+    return Result.success(Unit)
+  }
 
+  private fun queueLocation(
+      trigger: MessageLocation.ReportType,
+      location: Location,
+      loadedWaypoints: List<WaypointModel>,
+  ) {
     val message =
         if (preferences.extendedData) {
               fromLocation(location, Build.VERSION.SDK_INT).apply {
@@ -446,7 +537,6 @@ constructor(
     if (responseMessageTypes.contains(trigger)) {
       publishResponseMessageIdlingResource.setIdleState(true)
     }
-    return Result.success(Unit)
   }
 
   companion object {

@@ -166,6 +166,54 @@ object FolloRules {
   fun outHelloDue(lastOutHelloMs: Long?, nowMs: Long): Boolean =
       lastOutHelloMs == null || nowMs - lastOutHelloMs >= OUT_HELLO_EVERY_MS
 
+  // ── Edge hold (Alex's walk 2 Nov 2026) ────────────────────────────────────────────────────────
+  // A TEST circle's edge ran along the road: one fix 2 m out stood the phone by and the walk back 1–4 m INSIDE was never
+  // recorded. Alex: "Ok to cache some locally … they stay on phone and are discarded if they prove not to be within the
+  // circle the next time it starts transmitting or it's been 2 minutes or 50m (whichever occurs sooner)". In Move an
+  // outside fix is held on the phone (never sent) and tracking carries on; the next fix inside sends the held ones that
+  // are inside what the phone then holds and drops the rest; 2 min outside or 50 m beyond the nearest edge drops them all
+  // and stands the phone by as before.
+
+  const val HOLD_FOR_MS = 2 * 60 * 1000L
+  const val HOLD_BEYOND_M = 50.0
+  const val HOLD_CAP = 200
+
+  enum class GateVerdict { SHARE, HOLD, STANDBY }
+
+  /** Metres beyond the nearest held circle edge or boundary side; 0 inside; infinity when nothing is held. */
+  fun outsideByM(lat: Double, lon: Double, circles: List<Circle>, boundary: List<Pair<Double, Double>>?): Double {
+    if (insideSearch(lat, lon, circles, boundary)) return 0.0
+    var best = Double.POSITIVE_INFINITY
+    for (c in circles) best = minOf(best, distanceM(lat, lon, c.lat, c.lon) - c.r - 1.0)
+    if (boundary != null && boundary.size >= 2) {
+      val ky = 111_320.0
+      val kx = ky * Math.cos(Math.toRadians(lat))
+      var j = boundary.size - 1
+      for (i in boundary.indices) {
+        val ax = (boundary[j].second - lon) * kx
+        val ay = (boundary[j].first - lat) * ky
+        val bx = (boundary[i].second - lon) * kx
+        val by = (boundary[i].first - lat) * ky
+        val dx = bx - ax
+        val dy = by - ay
+        val len2 = dx * dx + dy * dy
+        val t = if (len2 > 0) (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0) else 0.0
+        best = minOf(best, Math.hypot(ax + t * dx, ay + t * dy))
+        j = i
+      }
+    }
+    return maxOf(best, 0.001)
+  }
+
+  /** The edge-hold rule: [beyondM] outside, outside since [sinceMs], in mode [mode]; a check-in never holds. */
+  fun gateVerdict(beyondM: Double, sinceMs: Long?, nowMs: Long, mode: MonitoringMode, checkIn: Boolean = false): GateVerdict =
+      when {
+        beyondM <= 0.0 -> GateVerdict.SHARE
+        checkIn || mode != MonitoringMode.Move || beyondM >= HOLD_BEYOND_M -> GateVerdict.STANDBY
+        sinceMs != null && nowMs - sinceMs >= HOLD_FOR_MS -> GateVerdict.STANDBY
+        else -> GateVerdict.HOLD
+      }
+
   /** What an automatic check-in does with its fix; [secondStep] = judging again after the hello's reply. */
   fun checkInAction(inside: Boolean, secondStep: Boolean): CheckInAction =
       when {

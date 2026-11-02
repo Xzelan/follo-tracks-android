@@ -15,6 +15,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.owntracks.android.data.repos.FolloDiagRepo
@@ -255,6 +256,45 @@ class LocationProcessorTest {
     assertTrue(captor.allValues[0] is MessageHello)
     assertTrue(captor.allValues[1] is MessageLocation)
     assertTrue(captor.allValues[2] is MessageHello)
+  }
+
+  /**
+   * Edge hold (Alex's walk 2 Nov 2026): in Move a fix just outside (the circle is 1000 m; 0.00901° ≈ 1002 m) is kept on
+   * the phone and tracking goes on. The next fix inside is sent; the held one, still outside, is dropped, never sent.
+   */
+  @Test
+  fun `a fix just outside is held, not sent, and the phone keeps tracking`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = movingPreferences()
+    val lp = outsideProcessor(messageProcessor, preferences)
+
+    lp.onLocationChanged(fixAt(0.00901, 1_000_000L), MessageLocation.ReportType.DEFAULT) // 1 m out: held
+    lp.onLocationChanged(fixAt(0.00902, 1_005_000L), MessageLocation.ReportType.DEFAULT) // 2 m out: held
+    lp.onLocationChanged(fixAt(0.0089, 1_010_000L), MessageLocation.ReportType.DEFAULT) // back inside: sent
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(1)).queueMessageForSending(captor.capture())
+    val sent = captor.firstValue as MessageLocation
+    assertEquals(0.0089, sent.latitude, 1e-9)
+    verify(preferences, never()).monitoring = MonitoringMode.Manual
+  }
+
+  /** 50 m or more beyond the edge (0.0095° ≈ 1056 m): every held fix dropped, standing by with the "out" hello. */
+  @Test
+  fun `50 m outside drops the held fixes and stands the phone by`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = movingPreferences()
+    val lp = outsideProcessor(messageProcessor, preferences)
+
+    lp.onLocationChanged(fixAt(0.00901, 1_000_000L), MessageLocation.ReportType.DEFAULT) // held
+    lp.onLocationChanged(fixAt(0.0095, 1_005_000L), MessageLocation.ReportType.DEFAULT) // 55 m out: stand by
+    lp.onLocationChanged(fixAt(0.0089, 1_010_000L), MessageLocation.ReportType.DEFAULT) // inside again: only this one
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    assertTrue(captor.allValues[0] is MessageHello)
+    assertEquals(0.0089, (captor.allValues[1] as MessageLocation).latitude, 1e-9)
+    verify(preferences, times(1)).monitoring = MonitoringMode.Manual
   }
 
   private suspend fun TestScope.buildLocationProcessor(
