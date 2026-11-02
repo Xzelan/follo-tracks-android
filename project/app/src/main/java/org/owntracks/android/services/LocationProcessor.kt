@@ -209,8 +209,16 @@ constructor(
    */
   suspend fun insideHeldSearch(location: Location): Boolean = outsideHeldSearchM(location) <= 0.0
 
-  /** Metres beyond what counts right now (0 = inside, infinity = nothing counts). */
-  private suspend fun outsideHeldSearchM(location: Location): Double {
+  /** Near-circle watch (2 Nov 2026): the phone holds wake-up circles that count right now (a search window is open). */
+  suspend fun watchCirclesCountNow(): Boolean {
+    val msg = folloStatusRepo.status.value?.message
+    return FolloRules.timedArea(heldCircles(), null, msg?.ends, msg?.windows(), System.currentTimeMillis() / 1000)
+        .first
+        .isNotEmpty()
+  }
+
+  /** Metres beyond what counts right now (0 = inside, infinity = nothing counts). Also the near-circle watch's judge. */
+  suspend fun outsideHeldSearchM(location: Location): Double {
     val msg = folloStatusRepo.status.value?.message
     val (circles, boundary) =
         FolloRules.timedArea(heldCircles(), msg?.polyPoints(), msg?.ends, msg?.windows(), System.currentTimeMillis() / 1000)

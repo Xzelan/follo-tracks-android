@@ -79,6 +79,7 @@ import org.owntracks.android.model.messages.MessageWakeAck
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
 import org.owntracks.android.preferences.types.MonitoringMode
+import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.preferences.types.MonitoringMode.Companion.getByValue
 import org.owntracks.android.services.worker.Scheduler
 import org.owntracks.android.support.DateFormatter.formatDate
@@ -242,6 +243,13 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         launch { setupGeofences() }
         // "No fix on open" (1 Nov 2026): the second judgement after a hello needs a fresh fix
         launch { locationProcessor.secondStepFixRequests.collect { folloCheckIn(it, secondStep = true) } }
+        // Near-circle watch (2 Nov 2026): a window opening, circles arriving or the phone standing by turn it on
+        launch {
+          while (true) {
+            evaluateNearWatch()
+            delay(60_000L)
+          }
+        }
         launch {
           locationRepo.currentPublishedLocation.collect { location ->
             location?.run {
@@ -268,6 +276,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   override fun onDestroy() {
     Timber.v("Backgroundservice onDestroy")
+    nearWatchCallback?.let { locationProviderClient.removeLocationUpdates(it) }
     folloDiagRepo.foregroundServiceRunning = false
     stopForeground(STOP_FOREGROUND_REMOVE)
     unregisterReceiver(powerBroadcastReceiver)
@@ -782,6 +791,64 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     if (folloCheckInCallback === callback) folloCheckInCallback = null
   }
 
+  // ── Near-circle watch (Alex's walk 2 Nov 2026, FolloRules.watchStage) ─────────────────────────
+  private var nearWatchCallback: LocationCallback? = null
+  private var nearWatchStage = FolloRules.WatchStage.OFF
+
+  /** Start, change or stop the watch's location request. */
+  private fun setNearWatch(stage: FolloRules.WatchStage) {
+    if (stage == nearWatchStage) return
+    nearWatchCallback?.let { locationProviderClient.removeLocationUpdates(it) }
+    nearWatchCallback = null
+    nearWatchStage = stage
+    Timber.i("near-circle watch: $stage")
+    if (stage == FolloRules.WatchStage.OFF || !requirementsChecker.hasLocationPermissions()) return
+    val near = stage == FolloRules.WatchStage.NEAR
+    val every = Duration.ofSeconds(if (near) FolloRules.NEAR_WATCH_EVERY_S else FolloRules.FAR_WATCH_EVERY_S)
+    val callback =
+        object : LocationCallback {
+          override fun onLocationResult(locationResult: LocationResult) {
+            val l = locationResult.lastLocation
+            lifecycleScope.launch { onNearWatchFix(l) }
+          }
+
+          override fun onLocationError() {}
+
+          override fun onLocationAvailability(locationAvailability: LocationAvailability) {}
+        }
+    nearWatchCallback = callback
+    locationProviderClient.requestLocationUpdates(
+        LocationRequest(
+            fastestInterval = every,
+            priority = if (near) LocatorPriority.HighAccuracy else LocatorPriority.BalancedPowerAccuracy,
+            interval = every,
+        ),
+        callback,
+        runThingsOnOtherThreads.getBackgroundLooper(),
+    )
+  }
+
+  /** Whether the watch should run at all: standing by, holding circles that count now (an open search window). */
+  private suspend fun evaluateNearWatch() {
+    val wanted = preferences.monitoring == MonitoringMode.Manual && locationProcessor.watchCirclesCountNow()
+    if (!wanted) setNearWatch(FolloRules.WatchStage.OFF)
+    else if (nearWatchStage == FolloRules.WatchStage.OFF) setNearWatch(FolloRules.WatchStage.FAR)
+  }
+
+  /** A watch fix: judged on the phone only. Inside (and good) => posted as a circle crossing; otherwise forgotten. */
+  private suspend fun onNearWatchFix(l: Location) {
+    if (preferences.monitoring != MonitoringMode.Manual) {
+      setNearWatch(FolloRules.WatchStage.OFF)
+      return
+    }
+    val beyond = locationProcessor.outsideHeldSearchM(l)
+    if (FolloRules.watchStarts(beyond, l.accuracy)) {
+      Timber.i("near-circle watch: inside (${l.accuracy.toInt()} m), starting as a circle crossing would")
+      locationProcessor.onLocationChanged(l, MessageLocation.ReportType.CIRCULAR)
+    }
+    setNearWatch(FolloRules.watchStage(beyond, l.accuracy))
+  }
+
   fun requestOnDemandLocationUpdate(reportType: MessageLocation.ReportType) {
     if (requirementsChecker.hasLocationPermissions()) {
       Timber.d("On demand location request")
@@ -881,7 +948,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
                   Geofence(
                       it.id.toString(),
                       Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT,
-                      2.minutes.inWholeMilliseconds.toInt(),
+                      // FOLLO (Alex, 2 Nov 2026): tell us at once (was upstream's "within 2 minutes is fine")
+                      0,
                       it.geofenceLatitude,
                       it.geofenceLongitude,
                       it.geofenceRadius.toFloat(),
@@ -941,6 +1009,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     }
     if (properties.contains("monitoring")) {
       setupLocationRequest()
+      lifecycleScope.launch { evaluateNearWatch() }
       ongoingNotification.setMonitoringMode(preferences.monitoring)
     }
     if (properties.intersect(PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS).isNotEmpty()) {

@@ -217,6 +217,33 @@ object FolloRules {
         else -> GateVerdict.HOLD
       }
 
+  // ── Near-circle watch (Alex's walk 2 Nov 2026) ───────────────────────────────────────────────
+  // FOLLO-R in a pocket: Play services checked the circles only every ~5 min (network fixes, no GPS), so walking in
+  // started nothing until the screen came on. Alex: "make it 100m from a circle … it's just locally trying to work out
+  // if it's inside or outside". While a search window is open and the phone stands by holding circles it watches its
+  // own position: within 100 m of a circle edge a GPS fix every 30 s, further out a rough (Wi-Fi/tower) fix every 2 min
+  // just to notice the approach. The fixes are only judged on the phone, never sent or kept; the first good one inside
+  // starts tracking exactly as a circle crossing does.
+
+  const val NEAR_WATCH_M = 100.0
+  const val NEAR_WATCH_EVERY_S = 30L
+  const val FAR_WATCH_EVERY_S = 120L
+  /** A watch fix starts tracking only this good (a rough network fix inside waits for the next GPS one). */
+  const val NEAR_WATCH_START_ACC_M = 30f
+
+  enum class WatchStage { OFF, FAR, NEAR }
+
+  /** The watch's next stage after a fix [beyondM] outside (0 inside; infinity = nothing counts now) with [accM]. */
+  fun watchStage(beyondM: Double, accM: Float): WatchStage =
+      when {
+        beyondM.isInfinite() -> WatchStage.OFF
+        beyondM - accM <= NEAR_WATCH_M -> WatchStage.NEAR
+        else -> WatchStage.FAR
+      }
+
+  /** Whether a watch fix starts tracking: inside, and good enough to trust. */
+  fun watchStarts(beyondM: Double, accM: Float): Boolean = beyondM <= 0.0 && accM <= NEAR_WATCH_START_ACC_M
+
   /** What an automatic check-in does with its fix; [secondStep] = judging again after the hello's reply. */
   fun checkInAction(inside: Boolean, secondStep: Boolean): CheckInAction =
       when {

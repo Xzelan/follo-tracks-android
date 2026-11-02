@@ -241,4 +241,17 @@ class FolloRulesTest {
     assertTrue(FolloRules.insideCircle(c.lat, c.lon + 1561.7 / (k * Math.cos(Math.toRadians(c.lat))), c))
     assertFalse(FolloRules.insideCircle(c.lat, c.lon + 1562.3 / (k * Math.cos(Math.toRadians(c.lat))), c))
   }
+
+  // Near-circle watch (Alex, 2 Nov 2026): within 100 m of a circle a GPS fix every 30 s, else a rough one every 2 min
+  @Test
+  fun `the watch looks closely within 100 m of a circle and starts only on a good fix inside`() {
+    assertEquals(FolloRules.WatchStage.NEAR, FolloRules.watchStage(80.0, 10f))
+    assertEquals("a rough fix that may be within 100 m", FolloRules.WatchStage.NEAR, FolloRules.watchStage(130.0, 40f))
+    assertEquals(FolloRules.WatchStage.FAR, FolloRules.watchStage(400.0, 20f))
+    assertEquals("no window open", FolloRules.WatchStage.OFF, FolloRules.watchStage(Double.POSITIVE_INFINITY, 5f))
+    assertEquals(FolloRules.WatchStage.NEAR, FolloRules.watchStage(0.0, 5f))
+    assertTrue(FolloRules.watchStarts(0.0, 8f))
+    assertFalse("a rough network fix inside waits for GPS", FolloRules.watchStarts(0.0, 45f))
+    assertFalse(FolloRules.watchStarts(3.0, 5f))
+  }
 }
