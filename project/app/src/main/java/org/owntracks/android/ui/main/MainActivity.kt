@@ -1067,13 +1067,18 @@ class MainActivity :
       }
       false
     }
-    // A pinch zooms about the fingers; put the arrow back on its spot for the new scale.
+    // A pinch zooms about the fingers; put the arrow back on its spot for the new scale. The credit follows the
+    // imagery at the middle of the map (5 Nov 2026).
     map.addMapListener(
         object : org.osmdroid.events.MapListener {
-          override fun onScroll(event: org.osmdroid.events.ScrollEvent?) = false
+          override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+            showCredit()
+            return false
+          }
 
           override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
             if (camera == Camera.NAV && !followPaused) requestNavFrame()
+            showCredit()
             return false
           }
         }
@@ -1123,11 +1128,21 @@ class MainActivity :
     showCredit()
   }
 
-  /** The current imagery's credit under the card (was osmdroid's CopyrightOverlay in the map's corner). */
+  /**
+   * The current imagery's credit under the card (was osmdroid's CopyrightOverlay in the map's corner). With imagery
+   * chosen per tile it is the imagery at the middle of the map (Alex, 5 Nov 2026), so it is checked on every scroll and
+   * zoom; the text is only touched when it changes.
+   */
   private fun showCredit() {
-    val text = map.tileProvider.tileSource.copyrightNotice.orEmpty()
-    binding.credit.text = text
-    binding.creditBar.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
+    val source = map.tileProvider.tileSource
+    val text =
+        if (source is FolloTileSource) {
+          val c = map.mapCenter
+          source.creditAt(c.latitude, c.longitude, org.osmdroid.util.TileSystem.getInputTileZoomLevel(map.zoomLevelDouble))
+        } else source.copyrightNotice.orEmpty()
+    if (binding.credit.text.toString() != text) binding.credit.text = text
+    val visibility = if (text.isBlank()) View.GONE else View.VISIBLE
+    if (binding.creditBar.visibility != visibility) binding.creditBar.visibility = visibility
   }
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
@@ -1163,8 +1178,11 @@ class MainActivity :
       // The map stays where the volunteer dragged it, but the arrow keeps showing where they are
       if (camera == Camera.NAV) {
         navTo = l.toGeoPoint()
+        navToT = l.time
         navGlideMs = 0L
         navArrow?.let { it.position = l.toGeoPoint() }
+        shownT = l.time
+        releaseTrack()
         requestNavFrame()
       }
       return
@@ -1201,6 +1219,8 @@ class MainActivity :
         // every frame in navFrame, so the two never fight.
         val p = l.toGeoPoint()
         val nowR = SystemClock.elapsedRealtime()
+        navFromT = if (ref == null) l.time else navTimeAt(nowR)
+        navToT = l.time
         navFrom = if (ref == null) p else navPosition(nowR) ?: p
         navTo = p
         navGlideStart = nowR
@@ -1281,6 +1301,7 @@ class MainActivity :
       map.scaleX = 1f
       map.scaleY = 1f
     }
+    releaseTrack() // without the arrow the whole track is drawn
     map.invalidate()
   }
 
@@ -1351,6 +1372,14 @@ class MainActivity :
   private var navTo: GeoPoint? = null
   private var navGlideStart = 0L
   private var navGlideMs = 0L
+  /**
+   * Fix times (ms) at the two ends of the glide, and the time the arrow is at — in between while it glides; 0 = no fix
+   * yet. The walking track is drawn only up to [shownT], then on to the arrow (Alex, 5 Nov 2026: "it draws the tracklog
+   * in front of the arrow and the arrow catches up"). The same as iOS.
+   */
+  private var navFromT = 0L
+  private var navToT = 0L
+  private var shownT = 0L
   /** The bearing shown at the top of the screen, eased toward the compass. */
   private var shownHeading = 0f
   private var headingInit = false
@@ -1371,6 +1400,13 @@ class MainActivity :
     if (navGlideMs <= 0L) return to
     val f = ((now - navGlideStart).toFloat() / navGlideMs).coerceIn(0f, 1f)
     return GeoPoint(from.latitude + (to.latitude - from.latitude) * f, from.longitude + (to.longitude - from.longitude) * f)
+  }
+
+  /** The fix time at the arrow's place along the current glide (see [navPosition]). */
+  private fun navTimeAt(now: Long): Long {
+    if (navGlideMs <= 0L || navFromT == 0L) return navToT
+    val f = ((now - navGlideStart).toFloat() / navGlideMs).coerceIn(0f, 1f)
+    return navFromT + ((navToT - navFromT) * f).toLong()
   }
 
   private fun navFrame() {
@@ -1409,6 +1445,8 @@ class MainActivity :
         map.controller.setCenter(headingUpCentre(pos, NAV_DOWN, shownHeading))
         arrow?.position = pos
         arrow?.rotation = 0f
+        shownT = navTimeAt(now)
+        releaseTrack() // the track points the arrow has passed, and the line on to it
         if (gliding) drawPair()
       }
     } else {
@@ -1611,6 +1649,15 @@ class MainActivity :
   private var drawnTrackSerial = -1
   /** The segment being walked right now; new points are appended to it. */
   private var trackTail: Polyline? = null
+  /** The newest track point drawn. */
+  private var trackLastDrawn: org.owntracks.android.data.repos.FolloTrackRepo.Point? = null
+  /**
+   * Track points the arrow has not reached yet, oldest first, each with whether it starts a new segment; drawn as the
+   * arrow passes them ([releaseTrack]). Meanwhile [trackToArrow] runs from the newest drawn point to the arrow.
+   */
+  private val trackHeld = ArrayDeque<Pair<org.owntracks.android.data.repos.FolloTrackRepo.Point, Boolean>>()
+  /** The track's last stretch, from its newest drawn point to the arrow, moved every frame of the glide (5 Nov 2026). */
+  private var trackToArrow: Polyline? = null
 
   private fun trackLine(points: List<GeoPoint>) =
       Polyline(map).apply {
@@ -1626,34 +1673,91 @@ class MainActivity :
   /**
    * The phone's own walking track: magenta like QField tracklogs, above the area, below the pair line. Each fix is
    * appended to the current line; the whole track is rebuilt only on load, clear, trim or after missed updates
-   * (review 21 Oct 2026: a full rebuild per fix stuttered after hours of walking).
+   * (review 21 Oct 2026: a full rebuild per fix stuttered after hours of walking). A point newer than where the arrow
+   * has glided to waits in [trackHeld] until the arrow passes it (5 Nov 2026), so the line never runs ahead of it.
    */
   private fun drawTrack(u: org.owntracks.android.data.repos.FolloTrackRepo.Update) {
     if (!::map.isInitialized || u.serial == drawnTrackSerial) return
-    val incremental = !u.reset && u.last != null && u.serial == drawnTrackSerial + 1 && trackTail != null
+    val incremental =
+        !u.reset && u.last != null && u.serial == drawnTrackSerial + 1 && (trackTail != null || trackHeld.isNotEmpty())
     drawnTrackSerial = u.serial
     if (incremental) {
-      val lp = u.last!!
-      val p = GeoPoint(lp.lat, lp.lon)
-      if (u.newSegment) {
-        val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
-        trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
-      } else trackTail!!.addPoint(p)
+      trackHeld.addLast(u.last!! to u.newSegment)
+      releaseTrack()
       map.invalidate()
       return
     }
     map.overlays.removeAll { it is Polyline && it.id == TRACK_ID }
     trackTail = null
+    trackToArrow = null
+    trackHeld.clear()
     val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
-    val points = viewModel.trackSnapshot()
-    val segments = viewModel.trackSegments(points)
+    val all = viewModel.trackSnapshot()
+    // Only up to where the arrow is; the rest waits for it
+    val reached = trackReachedT()
+    val shown = all.takeWhile { it.t <= reached }
+    val d = FloatArray(1)
+    for (i in shown.size until all.size) {
+      val q = all.getOrNull(i - 1)
+      val p = all[i]
+      val newSegment =
+          q != null &&
+              org.owntracks.android.data.repos.FolloTrackRepo.isBreak(
+                  p.t - q.t, d.also { Location.distanceBetween(q.lat, q.lon, p.lat, p.lon, it) }[0])
+      trackHeld.addLast(p to newSegment)
+    }
+    trackLastDrawn = shown.lastOrNull()
+    val segments = viewModel.trackSegments(shown)
     segments.reversed().forEach { seg -> map.overlays.add(at, trackLine(seg.map { GeoPoint(it.lat, it.lon) })) }
     // The tail is the last segment, or a fresh one-point line when the newest point stands alone
     val lastSeg = segments.lastOrNull()
     trackTail =
-        if (lastSeg != null && lastSeg.last() == points.lastOrNull()) map.overlays.filterIsInstance<Polyline>().last { it.id == TRACK_ID }
-        else points.lastOrNull()?.let { trackLine(listOf(GeoPoint(it.lat, it.lon))).also { l -> map.overlays.add(at, l) } }
+        if (lastSeg != null && lastSeg.last() == shown.lastOrNull()) map.overlays.filterIsInstance<Polyline>().last { it.id == TRACK_ID }
+        else shown.lastOrNull()?.let { trackLine(listOf(GeoPoint(it.lat, it.lon))).also { l -> map.overlays.add(at, l) } }
+    drawTrackToArrow()
     map.invalidate()
+  }
+
+  /** The fix time the drawn track may reach: where the arrow is while it is on the map, else everything. */
+  private fun trackReachedT(): Long = if (navOn && shownT > 0L) shownT else Long.MAX_VALUE
+
+  /** Draws the held track points the arrow has reached, then moves the line from the track's end to the arrow. */
+  private fun releaseTrack() {
+    if (!::map.isInitialized) return
+    val reached = trackReachedT()
+    while (trackHeld.isNotEmpty() && trackHeld.first().first.t <= reached) {
+      val (lp, newSegment) = trackHeld.removeFirst()
+      val p = GeoPoint(lp.lat, lp.lon)
+      val tail = trackTail
+      if (newSegment || tail == null) {
+        val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
+        trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
+      } else tail.addPoint(p)
+      trackLastDrawn = lp
+    }
+    drawTrackToArrow()
+  }
+
+  /**
+   * The line from the newest drawn track point to the arrow, while the arrow heads for a point not drawn yet. None
+   * across a break in the track (the held point starts a new segment) or when there is no arrow.
+   */
+  private fun drawTrackToArrow() {
+    val last = trackLastDrawn
+    val held = trackHeld.firstOrNull()
+    val arrow = navArrow?.position?.takeIf { navOn && shownT > 0L && it.latitude != 0.0 }
+    if (last == null || held == null || held.second || arrow == null) {
+      trackToArrow?.let { map.overlays.remove(it) }
+      trackToArrow = null
+      return
+    }
+    val ends = listOf(GeoPoint(last.lat, last.lon), GeoPoint(arrow.latitude, arrow.longitude))
+    val line = trackToArrow
+    if (line != null) line.setPoints(ends)
+    else {
+      val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
+      trackToArrow = trackLine(ends).also { map.overlays.add(at, it) }
+    }
   }
 
   /** This phone's team's line leaders from the server (21 Oct 2026); the map shows only these people. */

@@ -58,7 +58,7 @@ constructor(
       val d = FloatArray(1)
       Location.distanceBetween(last.lat, last.lon, l.latitude, l.longitude, d)
       if (d[0] < STEP_M) return
-      newSegment = l.time - last.t > BREAK_GAP_MS || d[0] > BREAK_JUMP_M
+      newSegment = isBreak(l.time - last.t, d[0])
     }
     val p = Point(l.latitude, l.longitude, l.time)
     list.add(p)
@@ -86,7 +86,7 @@ constructor(
     for (p in points) {
       previous?.let { q ->
         Location.distanceBetween(q.lat, q.lon, p.lat, p.lon, d)
-        if (p.t - q.t > BREAK_GAP_MS || d[0] > BREAK_JUMP_M) {
+        if (isBreak(p.t - q.t, d[0])) {
           if (current.size >= 2) segments.add(current)
           current = mutableListOf()
         }
@@ -131,6 +131,9 @@ constructor(
   }
 
   companion object {
+    /** The line is broken between two points this far apart in time (ms) or distance (m). */
+    fun isBreak(gapMs: Long, jumpM: Float): Boolean = gapMs > BREAK_GAP_MS || jumpM > BREAK_JUMP_M
+
     private const val KEY = "track"
     private const val KEEP_MS = 12 * 60 * 60 * 1000L
     private const val WORST_ACCURACY_M = 30f
