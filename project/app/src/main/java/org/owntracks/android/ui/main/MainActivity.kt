@@ -1193,7 +1193,18 @@ class MainActivity :
     val now = System.currentTimeMillis()
     if (ref != null) {
       val gate = maxOf(JITTER_M, minOf(l.accuracy, 15f))
-      if (ref.distanceTo(l) < gate) return
+      if (ref.distanceTo(l) < gate) {
+        // The arrow stays put (wobble, or back where it was after a walk with the screen off): it is as good as at this
+        // fix, so the track points up to now are drawn, not held for the next move (5 Nov 2026, as iOS). A glide still
+        // running draws them as it ends.
+        if (navGlideMs <= 0L || SystemClock.elapsedRealtime() >= navGlideStart + navGlideMs) {
+          shownT = maxOf(shownT, l.time)
+          navToT = shownT
+          releaseTrack()
+          map.invalidate()
+        }
+        return
+      }
       val b = ref.bearingTo(l)
       bearing = if (hasBearing) blendAngle(bearing, b, 0.5f) else b
       hasBearing = true
