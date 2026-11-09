@@ -48,7 +48,7 @@ private constructor(private val template: String, val nativeMaxZoom: Int, val au
   companion object {
     /** The per-tile source's cache name. Bump the number when [FolloImagery]'s outlines change, so no tile cached
      * under the old outlines (another layer at the same index) is shown again. */
-    private const val AUTO_NAME = "follo-auto-1"
+    private const val AUTO_NAME = "follo-auto-2" // 2: Esri asked with blankTile=false (9 Nov 2026), no grey tiles kept
 
     /** Only https templates are used; anything else (a crafted setup link, say) gets the built-in imagery. */
     fun of(template: String?, maxZoom: Int = 20): FolloTileSource {
@@ -66,7 +66,7 @@ private constructor(private val template: String, val nativeMaxZoom: Int, val au
   /** Esri World Imagery, which [ShiftedTilesOverlay] draws [ESRI_SHIFT_SOUTH_M] further south. Fixed sources only;
    * the per-tile source asks [isEsriTile]. */
   val isEsri: Boolean
-    get() = !auto && "World_Imagery" in template
+    get() = !auto && FolloImagery.isEsri(template)
 
   /** Whether this tile is Esri imagery (per tile for the [auto] source). */
   fun isEsriTile(x: Int, y: Int, z: Int): Boolean =
@@ -144,8 +144,21 @@ object FolloImagery {
     return layer(lat, lon, z)
   }
 
-  fun url(template: String, x: Int, y: Int, z: Int): String =
-      template.replace("{z}", z.toString()).replace("{x}", x.toString()).replace("{y}", y.toString())
+  /** Esri asked with blankTile=false (9 Nov 2026), so a level it has no imagery at is a 404, not a picture. */
+  fun url(template: String, x: Int, y: Int, z: Int): String {
+    val s = template.replace("{z}", z.toString()).replace("{x}", x.toString()).replace("{y}", y.toString())
+    return if (isEsri(template) && "blankTile" !in s) s + (if ("?" in s) "&" else "?") + "blankTile=false" else s
+  }
+
+  /**
+   * Esri answers a level it has no imagery at with a grey "Map data not yet available" picture (HTTP 200), and how deep
+   * it goes changes from place to place: round Deloraine and George Town it stops at 18, so the walking view (z19 tiles)
+   * was all grey (Greg G's iPhone screenshot, 9 Nov 2026; Android the same). Asked with blankTile=false a missing tile is
+   * a 404 instead, and [FolloTileProvider] draws the deepest level above it that exists, enlarged — up to this many up.
+   */
+  const val ESRI_FALLBACK_LEVELS = 6
+
+  fun isEsri(template: String?): Boolean = template != null && "World_Imagery" in template
 }
 
 /** The deepest zoom the map allows. */
@@ -171,15 +184,33 @@ private class EnlargingTileDownloader : TileDownloader() {
       source: OnlineTileSourceBase
   ): Drawable? {
     // per tile: the auto source's layers stop at different levels (LIST and Esri 19, QLD and NSW 20)
-    val native = (source as? FolloTileSource)?.nativeMaxZoom(index) ?: return super.downloadTile(index, redirectCount, url, cache, source)
-    val dz = MapTileIndex.getZoom(index) - native
-    if (dz <= 0) return super.downloadTile(index, redirectCount, url, cache, source)
-    val parent = MapTileIndex.getTileIndex(native, MapTileIndex.getX(index) shr dz, MapTileIndex.getY(index) shr dz)
-    // the parent from the file cache if it is there (its four children share it), else downloaded and cached
-    val got =
-        runCatching { cache?.loadTile(source, parent) }.getOrNull()
-            ?: super.downloadTile(parent, redirectCount, source.getTileURLString(parent), cache, source)
-    val bitmap = (got as? BitmapDrawable)?.bitmap?.takeIf { !it.isRecycled } ?: return null
+    val folloSource = source as? FolloTileSource ?: return super.downloadTile(index, redirectCount, url, cache, source)
+    val z = MapTileIndex.getZoom(index)
+    val x = MapTileIndex.getX(index)
+    val y = MapTileIndex.getY(index)
+    val top = minOf(z, folloSource.nativeMaxZoom(index))
+    // Esri: a level with no imagery here is a 404 (blankTile=false), so the levels above are tried in turn (9 Nov 2026)
+    val floor = if (folloSource.isEsriTile(x, y, z)) maxOf(0, top - FolloImagery.ESRI_FALLBACK_LEVELS) else top
+    for (pz in top downTo floor) {
+      val dz = z - pz
+      if (dz == 0) {
+        val got = super.downloadTile(index, redirectCount, url, cache, source)
+        if (got != null || floor == top) return got
+        continue
+      }
+      val parent = MapTileIndex.getTileIndex(pz, x shr dz, y shr dz)
+      // the parent from the file cache if it is there (its children share it), else downloaded and cached
+      val got =
+          runCatching { cache?.loadTile(source, parent) }.getOrNull()
+              ?: super.downloadTile(parent, redirectCount, source.getTileURLString(parent), cache, source)
+      val bitmap = (got as? BitmapDrawable)?.bitmap?.takeIf { !it.isRecycled } ?: continue
+      return enlarge(bitmap, index, parent, dz)
+    }
+    return null
+  }
+
+  /** The part of [bitmap] (the tile at [parent], [dz] levels above) under the tile at [index], at full tile size. */
+  private fun enlarge(bitmap: Bitmap, index: Long, parent: Long, dz: Int): Drawable? {
     val n = 1 shl dz
     val w = bitmap.width / n
     val h = bitmap.height / n

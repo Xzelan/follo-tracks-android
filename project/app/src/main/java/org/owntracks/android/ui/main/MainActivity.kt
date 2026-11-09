@@ -1144,8 +1144,18 @@ class MainActivity :
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
     map.maxZoomLevel = MAP_MAX_ZOOM.toDouble()
-    map.controller.setZoom(START_ZOOM) // walking scale; the NAV look zooms out to make up for its tilt
-    map.controller.setCenter(GeoPoint(-41.1, 146.83)) // until the first fix arrives
+    // Until the first fix: the phone's own fix if there is one, else the last position Android already holds (read from
+    // its cache, no new fix taken, never sent: only the map uses it) at walking scale, else the Australia overview
+    // (9 Nov 2026, Greg G: the app opened on a George Town street, grey where the imagery stops, before his first fix)
+    val known = viewModel.currentLocation.value ?: lastKnownForMap()
+    if (known != null) {
+      map.controller.setZoom(START_ZOOM) // walking scale
+      map.controller.setCenter(known.toGeoPoint())
+    } else {
+      overviewUntilFix = true
+      map.controller.setZoom(OVERVIEW_ZOOM)
+      map.controller.setCenter(GeoPoint(-28.0, 134.0))
+    }
 
     val provider =
         object : IMyLocationProvider {
@@ -1204,6 +1214,18 @@ class MainActivity :
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
 
+  /** The map shows the Australia overview (no position known yet); the first fix zooms in to walking scale. */
+  private var overviewUntilFix = false
+
+  /** The newest position Android already has from any provider, without asking for a new one; null without permission. */
+  @android.annotation.SuppressLint("MissingPermission")
+  private fun lastKnownForMap(): Location? =
+      runCatching {
+            val lm = getSystemService(android.location.LocationManager::class.java)
+            lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+          }
+          .getOrNull()
+
   /**
    * Ways the map can follow the dot. [Camera.NAV] is the app's (Alex chose it from the side-by-side
    * recordings, 20 Oct 2026); the rest stay for comparison, selectable in debug builds only.
@@ -1231,6 +1253,14 @@ class MainActivity :
 
   private fun followCamera(l: Location) {
     if (!::map.isInitialized || map.width == 0 || map.height == 0) return
+    if (overviewUntilFix) {
+      // First fix after the overview: down to walking scale over it, following
+      overviewUntilFix = false
+      followPaused = false
+      camRef = null
+      map.controller.setZoom(START_ZOOM)
+      map.controller.setCenter(l.toGeoPoint())
+    }
     if (followPaused || gestureActive) {
       // The map stays where the volunteer dragged it, but the arrow keeps showing where they are
       if (camera == Camera.NAV) {
@@ -2018,6 +2048,8 @@ class MainActivity :
     /** ≤ 30 camera redraws a second. */
     private const val FRAME_MIN_MS = 33L
     private const val START_ZOOM = 18.5
+    /** All of Australia, shown until the first fix when the phone has no position at all. */
+    private const val OVERVIEW_ZOOM = 4.0
     private const val LABEL_SUFFIX = "-label"
     private const val CONTACT_PREFIX = "contact-"
     /** A Significant-mode phone may not post for hours; keep the last server word that long. */

@@ -31,6 +31,10 @@ class FolloImageryTest {
     assertEquals(FolloImagery.esri, FolloImagery.layer(0, 0, 5)) // zoomed out: Esri everywhere
     assertEquals(FolloImagery.esri, FolloImagery.layer(tileX(146.82, 9), tileY(-41.10, 9), 9)) // below z10 too
     assertTrue(FolloImagery.url(FolloImagery.tas.template, 1, 2, 3).endsWith("/tile/3/2/1"))
+    // Esri: a level it has no imagery at must be a 404, not its grey "Map data not yet available" picture (9 Nov 2026)
+    assertTrue(FolloImagery.url(FolloImagery.esri.template, 1, 2, 3).endsWith("/tile/3/2/1?blankTile=false"))
+    assertTrue(FolloImagery.isEsri(FolloImagery.esri.template))
+    assertFalse(FolloImagery.isEsri(FolloImagery.tas.template))
   }
 
   @Test

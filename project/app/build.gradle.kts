@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.32" // 9 Nov 2026: queued positions sent after standby, battery saver note, While Using reminder, build in fd
+val versionNameValue = "0.1.33" // 9 Nov 2026: Esri tiles past its imagery = the level above (no grey "Map data not yet available"); start view = last known position or Australia
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026
