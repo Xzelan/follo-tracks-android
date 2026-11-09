@@ -55,4 +55,13 @@ class FolloDiagTest {
     val withFd = parser.fromJson("""{"_type":"location","lat":1,"lon":2,"tst":3,"tid":"IP","fd":{"fg":1,"au":"inuse","src":"user"}}""") as MessageLocation
     assertEquals("inuse", withFd.fd?.au)
   }
+
+  @Test
+  fun `fd carries the app version as the heading shows it`() {
+    // 9 Nov 2026 review: fd had only pv (the boundary version), so a phone's build could not be read from cmdlog
+    assertEquals("0.1.32", org.owntracks.android.data.repos.FolloDiagRepo.appVersion("0.1.32", 0))
+    assertEquals("0.1.25 (2)", org.owntracks.android.data.repos.FolloDiagRepo.appVersion("0.1.25", 2))
+    val json = parser.toJsonPlain(MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 1, v = "0.1.32") })
+    assertTrue(json, json.contains("\"v\":\"0.1.32\""))
+  }
 }

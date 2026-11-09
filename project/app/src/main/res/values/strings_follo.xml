@@ -83,6 +83,11 @@
     <string name="follo_shake_hint">Give the phone a gentle shake to turn the screen</string>
     <string name="follo_location_howto">Permissions › Location › Allow all the time</string>
     <string name="follo_notif_off_note">Notifications are off — the app still works</string>
+    <string name="follo_battery_saver_note">Battery saver is on, so your track will have gaps. Tap here and turn it off for the search</string>
+    <string name="follo_battery_saver_howto">Settings › Battery › Battery saver › off</string>
+    <string name="follo_bg_reminder_title">Location is still While Using</string>
+    <string name="follo_bg_reminder_msg">Tracking stops when your screen locks, so the line sees you only while the phone is in your hand. In Settings choose Permissions › Location › Allow all the time.</string>
+    <string name="follo_bg_reminder_open">Open Settings</string>
     <string name="follo_send_now">Sending your position…</string>
 
     <string name="follo_setup_title">Set up FOLLO Tracks?</string>

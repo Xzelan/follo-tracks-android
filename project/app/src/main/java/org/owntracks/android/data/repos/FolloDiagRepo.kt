@@ -74,6 +74,13 @@ constructor(
         pn = if (pushTokenRepo.notificationsAllowed()) 1 else 0,
         pt = push?.first,
         pp = push?.second,
+        v = appVersion(),
     )
+  }
+
+  companion object {
+    /** "0.1.32", or "0.1.32 (1)" for a second build of the same version: what the heading shows (MainActivity). */
+    fun appVersion(name: String = org.owntracks.android.BuildConfig.VERSION_NAME, build: Int = org.owntracks.android.BuildConfig.FOLLO_BUILD): String =
+        if (build > 0) "$name ($build)" else name
   }
 }

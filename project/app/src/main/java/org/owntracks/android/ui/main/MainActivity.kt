@@ -246,6 +246,8 @@ class MainActivity :
     applyOrientation(resources.configuration.orientation)
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
+    binding.note.setOnClickListener { onNoteClicked() }
+
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
     binding.banner.setOnClickListener { recentre() } // top or bottom, either one brings the arrow back (Alex 24 Oct 2026)
@@ -409,6 +411,7 @@ class MainActivity :
   }
 
   override fun onStop() {
+    remindedBackground = false   // the While Using reminder is once per open
     viewModel.saveTrack()
     unbindService(serviceConnection)
     super.onStop()
@@ -669,11 +672,19 @@ class MainActivity :
     }
     if (
         !requirementsChecker.hasBackgroundLocationPermission() &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            !preferences.userDeclinedEnableBackgroundLocationPermissions
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     ) {
-      requestBackgroundLocation()
-      return
+      if (!preferences.userDeclinedEnableBackgroundLocationPermissions) {
+        requestBackgroundLocation()
+        return
+      }
+      // Still While Using after the one Android prompt (field review 9 Nov 2026: Kellie tracked only with the screen
+      // on): the reminder comes back once every time the app is opened, with the way to Settings. Same on iOS.
+      if (!remindedBackground) {
+        remindedBackground = true
+        showBackgroundReminder()
+        return
+      }
     }
     if (
         !notificationPermissionRequester.hasPermission() &&
@@ -706,6 +717,29 @@ class MainActivity :
         .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
           promptInFlight = false
           preferences.userDeclinedEnableLocationPermissions = true
+          render()
+        }
+        .show()
+        .also { ownDialog = it }
+  }
+
+  /** Once per app open while location stays While Using (Android shows its own prompt only once). */
+  private var remindedBackground = false
+
+  private fun showBackgroundReminder() {
+    promptInFlight = true
+    render()
+    MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.follo_bg_reminder_title)
+        .setMessage(R.string.follo_bg_reminder_msg)
+        .setPositiveButton(R.string.follo_bg_reminder_open) { _, _ ->
+          promptInFlight = false
+          render()
+          Toast.makeText(this, R.string.follo_location_howto, Toast.LENGTH_LONG).show()
+          openAppSettings()
+        }
+        .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
+          promptInFlight = false
           render()
         }
         .show()
@@ -978,12 +1012,35 @@ class MainActivity :
     viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }
     val text = parts.joinToString(" · ")
     if (binding.last.text.toString() != text) binding.last.text = text
+    // Battery saver (field review 9 Nov 2026: Leonie Ch 55 fixes in 5 h, Heiner, Matt C, Lissa, Mitchell R, Paul, Tyrone,
+    // David S, Marie — fd.lp 1 ⇒ thin, gappy tracks even with the app exempt from battery optimisation). It is the phone's
+    // own setting, so the note says what to do and a tap opens the Battery saver page; it comes first, over the
+    // notifications note.
+    batterySaverNote = b.kind != Kind.NOT_SET_UP && isPowerSaveMode()
     val note =
-        if (b.kind != Kind.NOT_SET_UP && !promptInFlight && !notificationPermissionRequester.hasPermission())
-            getString(R.string.follo_notif_off_note)
-        else ""
+        when {
+          batterySaverNote -> getString(R.string.follo_battery_saver_note)
+          b.kind != Kind.NOT_SET_UP && !promptInFlight && !notificationPermissionRequester.hasPermission() ->
+              getString(R.string.follo_notif_off_note)
+          else -> ""
+        }
     if (binding.note.text.toString() != note) binding.note.text = note
     binding.note.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
+  }
+
+  private var batterySaverNote = false
+
+  private fun isPowerSaveMode(): Boolean =
+      (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
+
+  /** The note under the card: while it says Battery saver is on, a tap opens that setting. */
+  private fun onNoteClicked() {
+    if (!batterySaverNote) return
+    try {
+      settingsLauncher.launch(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+    } catch (e: Exception) {
+      Toast.makeText(this, R.string.follo_battery_saver_howto, Toast.LENGTH_LONG).show()
+    }
   }
 
   // ── Map ───────────────────────────────────────────────────────────────────────────────

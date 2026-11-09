@@ -318,9 +318,14 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   override fun onTaskRemoved(rootIntent: Intent?) {
     // FOLLO: standing by (outside a search area), swiping the app away closes it, as on iOS. The
     // wake circles stay registered with Play services, and crossing one starts the service again.
+    // 9 Nov 2026 (field review): a phone that lost signal in the bush stands itself by at the window's end with the
+    // day's last fixes still queued (Vivienne: 1,980 of them). Closing then would hold them until the app is next
+    // opened, so while anything is queued the service stays, as it does while sharing, and the queue leaves when
+    // signal returns (MessageProcessor retries on every network change).
+    val queued = endpointStateRepo.endpointQueueLength.value
     if (
-        preferences.monitoring == MonitoringMode.Manual ||
-            preferences.monitoring == MonitoringMode.Quiet
+        (preferences.monitoring == MonitoringMode.Manual ||
+            preferences.monitoring == MonitoringMode.Quiet) && queued <= 0
     ) {
       Timber.i("Task removed while standing by, closing")
       stopForeground(STOP_FOREGROUND_REMOVE)
@@ -329,6 +334,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       super.onTaskRemoved(rootIntent)
       return
     }
+    if (queued > 0) Timber.i("Task removed with $queued positions queued: staying to send them")
     Timber.i("Task removed, scheduling a service restart in $TASK_REMOVED_RESTART_DELAY")
     try {
       alarmManager.setAndAllowWhileIdle(

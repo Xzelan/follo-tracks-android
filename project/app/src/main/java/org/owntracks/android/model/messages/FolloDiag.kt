@@ -13,7 +13,8 @@ import kotlinx.serialization.Serializable
  * the foreground service is running · lp battery saver · q positions queued · src trigger name ·
  * pv version of the search boundary the phone holds (the server repeats `poly` only when this differs) ·
  * pn 1 notifications allowed / 0 not · pt push token + pp "fcm" (29 Oct 2026: only when the token changed,
- * on the first three posts after the process started, or once an hour; see PushTokenRepo)
+ * on the first three posts after the process started, or once an hour; see PushTokenRepo) · v the app's version
+ * as the heading shows it, "0.1.32" or "0.1.32 (1)" (9 Nov 2026 review: fd had only pv, the boundary version)
  */
 @Serializable
 data class FolloDiag(
@@ -31,4 +32,5 @@ data class FolloDiag(
     @SerialName("pn") val pn: Int? = null,
     @SerialName("pt") val pt: String? = null,
     @SerialName("pp") val pp: String? = null,
+    @SerialName("v") val v: String? = null,
 )

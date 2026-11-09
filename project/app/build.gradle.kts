@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.31" // 3 Nov 2026: area edge drawn without the zero-width links between separate circle groups
+val versionNameValue = "0.1.32" // 9 Nov 2026: queued positions sent after standby, battery saver note, While Using reminder, build in fd
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026
