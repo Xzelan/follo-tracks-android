@@ -104,6 +104,16 @@
             android:textColor="@color/follo_subtext"
             android:textSize="15sp" />
 
+        <!-- Offline map (10 Nov 2026): "Saving offline map: 45%" / "Offline map saved" / the waiting line (tap) -->
+        <TextView
+            android:id="@+id/offline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/follo_subtext"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/note"
             android:layout_width="match_parent"

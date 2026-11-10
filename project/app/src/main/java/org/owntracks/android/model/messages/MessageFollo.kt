@@ -31,6 +31,18 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   var line: String? = null
   /** Volunteer's name as the roster has it, for the card. */
   var name: String? = null
+  /** The volunteer's team as the roster has it ("Blue"): its search grids are drawn bold (10 Nov 2026). */
+  var team: String? = null
+  /**
+   * Version of the search grids the server holds for this phone (10 Nov 2026), "0" = none. The grids themselves come
+   * from GET /grid when this differs from the version the phone holds (FolloGridRepo). Null = an older server.
+   */
+  var gridv: String? = null
+  /**
+   * Offline map (10 Nov 2026): which areas' circles to save imagery for and how much. Null = save nothing (what is
+   * saved already stays).
+   */
+  var off: FolloOff? = null
   /** Volunteer's tracker ID as the roster has it (3 characters since 24 Oct 2026, e.g. JE1); the phone's own is only 2. */
   var tid: String? = null
   /** XYZ tile URL template for the map; applied when it changes. */
@@ -110,6 +122,19 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   companion object {
     const val TYPE = "follo"
   }
+}
+
+/**
+ * The offline map's settings, all the server's: [z] = area code → deepest zoom to save, [km] = only areas whose nearest
+ * circle is this close to the phone, [cap] = most tiles in total, [free] = most tiles fetched on a metered connection
+ * without asking.
+ */
+@Serializable
+class FolloOff {
+  var z: Map<String, Int>? = null
+  var km: Double? = null
+  var cap: Int? = null
+  var free: Int? = null
 }
 
 /** The pair partner: its tracker ID and its location topic (= the teammate's contact id on this phone). */

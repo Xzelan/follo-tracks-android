@@ -22,6 +22,10 @@
     <device-transfer>
         <include domain="root" />
         <include domain="file" />
+        <!-- FOLLO: the map's tile cache (with the offline map, ~220 MB) is fetched again by the new phone -->
+        <exclude
+            domain="file"
+            path="osmdroid/" />
         <include
             domain="database"
             path="." />

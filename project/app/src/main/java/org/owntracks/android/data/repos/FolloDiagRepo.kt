@@ -28,6 +28,8 @@ constructor(
     private val endpointStateRepo: EndpointStateRepo,
     private val folloStatusRepo: FolloStatusRepo,
     private val pushTokenRepo: PushTokenRepo,
+    private val folloGridRepo: FolloGridRepo,
+    private val folloOfflineRepo: FolloOfflineRepo,
 ) {
   @Volatile private var launchReason: String? = null
 
@@ -75,6 +77,8 @@ constructor(
         pt = push?.first,
         pp = push?.second,
         v = appVersion(),
+        gv = folloGridRepo.heldVersion(),
+        of = folloOfflineRepo.percent,
     )
   }
 

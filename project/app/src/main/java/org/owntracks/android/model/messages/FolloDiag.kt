@@ -33,4 +33,8 @@ data class FolloDiag(
     @SerialName("pt") val pt: String? = null,
     @SerialName("pp") val pp: String? = null,
     @SerialName("v") val v: String? = null,
+    /** Version of the search grids the phone holds (10 Nov 2026). */
+    @SerialName("gv") val gv: String? = null,
+    /** Offline map: percent of its tiles saved, 0–100; absent when there is nothing to save. */
+    @SerialName("of") val of: Int? = null,
 )

@@ -36,7 +36,6 @@ import androidx.core.view.updatePadding
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
@@ -47,7 +46,6 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import org.osmdroid.config.Configuration
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
@@ -95,6 +93,8 @@ class MainActivity :
 
   @Inject lateinit var preferences: Preferences
   @Inject lateinit var folloDiagRepo: FolloDiagRepo
+  @Inject lateinit var folloGridRepo: org.owntracks.android.data.repos.FolloGridRepo
+  @Inject lateinit var folloOfflineRepo: org.owntracks.android.data.repos.FolloOfflineRepo
   @Inject lateinit var requirementsChecker: RequirementsChecker
   @Inject lateinit var notificationsStash: NotificationsStash
   @Inject lateinit var contactImageBindingAdapter: ContactImageBindingAdapter
@@ -217,6 +217,7 @@ class MainActivity :
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     folloDiagRepo.noteLaunch("user")
+    FolloTileCache.configure(this) // before the layout: the MapView opens the tile cache as it is created
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
     // 1 Nov 2026: the heading carries the version and build ("FOLLO Tracks 0.1.25 (1)") so a phone's build can be read
@@ -247,6 +248,8 @@ class MainActivity :
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
     binding.note.setOnClickListener { onNoteClicked() }
+    binding.offline.setOnClickListener { onOfflineClicked() }
+    binding.offline.isClickable = false // only the waiting line takes a tap; otherwise the card does (recentre)
 
     binding.action.setOnClickListener { onActionClicked() }
     binding.card.setOnClickListener { recentre() }
@@ -323,6 +326,12 @@ class MainActivity :
         launch { viewModel.rejected.collect { render() } }
         launch {
           viewModel.folloStatus.collect {
+            it?.message?.team.let { team ->
+              if (gridOverlay?.ownTeam != team) {
+                gridOverlay?.ownTeam = team
+                map.invalidate()
+              }
+            }
             drawAreaBox(it?.message)
             syncContactMarkers()
             drawPair()
@@ -333,6 +342,7 @@ class MainActivity :
         launch {
           viewModel.currentLocation.collect {
             it?.let(viewModel::addTrack)
+            it?.let { l -> folloOfflineRepo.notePosition(l.latitude, l.longitude) }
             it?.let(compass::updateDeclination)
             it?.let(::followCamera)
             checkInIfReady()
@@ -341,6 +351,13 @@ class MainActivity :
           }
         }
         launch { viewModel.lastPublished.collect { render() } }
+        launch { folloOfflineRepo.state.collect { renderOffline(it) } }
+        launch {
+          folloGridRepo.grid.collect {
+            gridOverlay?.grid = it
+            map.invalidate()
+          }
+        }
         launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
@@ -429,6 +446,9 @@ class MainActivity :
       myLocationOverlay?.enableMyLocation()
     }
     if (preferences.setupCompleted) runPermissionChain()
+    // Offline map + search grids (10 Nov 2026): look again whenever the app comes forward
+    folloOfflineRepo.kick()
+    folloGridRepo.refresh()
     // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
     // circles for any search in the next 14 days. Sent once the screen has a fix better than 100 m.
     if (preferences.setupCompleted && requirementsChecker.hasLocationPermissions()) {
@@ -1030,6 +1050,37 @@ class MainActivity :
 
   private var batterySaverNote = false
 
+  // ── Offline map + search grids (10 Nov 2026) ─────────────────────────────────────────────
+
+  /** The search grids, under everything else the app draws on the map. */
+  private var gridOverlay: FolloGridOverlay? = null
+
+  /** The card's third line: how far the offline map is. Only the waiting line takes a tap. */
+  private fun renderOffline(s: org.owntracks.android.data.repos.FolloOfflineRepo.State) {
+    if (!::binding.isInitialized) return
+    val text =
+        when (s) {
+          is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving -> getString(R.string.follo_offline_saving, s.percent)
+          is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting -> getString(R.string.follo_offline_waiting)
+          org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved -> getString(R.string.follo_offline_saved)
+          org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden -> ""
+        }
+    if (binding.offline.text.toString() != text) binding.offline.text = text
+    binding.offline.visibility = if (text.isBlank() || !preferences.setupCompleted) View.GONE else View.VISIBLE
+    binding.offline.isClickable = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting
+  }
+
+  /** A tap on "Offline map: waiting for Wi-Fi. Tap to use mobile data": one question, then the download. */
+  private fun onOfflineClicked() {
+    val s = folloOfflineRepo.state.value as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting ?: return
+    MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.follo_offline_ask_title)
+        .setMessage(getString(R.string.follo_offline_ask_msg, s.megabytes))
+        .setPositiveButton(R.string.follo_offline_ask_yes) { _, _ -> folloOfflineRepo.allowMetered() }
+        .setNegativeButton(R.string.follo_offline_ask_no, null)
+        .show()
+  }
+
   private fun isPowerSaveMode(): Boolean =
       (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
 
@@ -1046,11 +1097,6 @@ class MainActivity :
   // ── Map ───────────────────────────────────────────────────────────────────────────────
 
   private fun setUpMap() {
-    Configuration.getInstance().apply {
-      load(this@MainActivity, PreferenceManager.getDefaultSharedPreferences(this@MainActivity))
-      userAgentValue = packageName
-      osmdroidTileCache = noBackupFilesDir.resolve("osmdroid/tiles")
-    }
     map = binding.map
     viewModel.tileState.value.let { (url, maxZoom) ->
       map.setTileProvider(FolloTileProvider(this, FolloTileSource.of(url, maxZoom))) // enlarges past the imagery's depth
@@ -1144,10 +1190,19 @@ class MainActivity :
     map.isTilesScaledToDpi = true
     map.minZoomLevel = 3.0
     map.maxZoomLevel = MAP_MAX_ZOOM.toDouble()
+    // The search grids (10 Nov 2026): first in the list, so the track, the circles, teammates and the phone's own
+    // arrow are all drawn over them (the track and the circle lines are placed after it, see aboveAreaAndTrack)
+    gridOverlay =
+        FolloGridOverlay(resources.displayMetrics.density, resources.displayMetrics.density * resources.configuration.fontScale).also {
+          it.grid = folloGridRepo.grid.value
+          it.ownTeam = viewModel.folloStatus.value?.message?.team
+          map.overlays.add(0, it)
+        }
     // Until the first fix: the phone's own fix if there is one, else the last position Android already holds (read from
     // its cache, no new fix taken, never sent: only the map uses it) at walking scale, else the Australia overview
     // (9 Nov 2026, Greg G: the app opened on a George Town street, grey where the imagery stops, before his first fix)
     val known = viewModel.currentLocation.value ?: lastKnownForMap()
+    known?.let { folloOfflineRepo.notePosition(it.latitude, it.longitude) } // which areas are near enough to save (phone only)
     if (known != null) {
       map.controller.setZoom(START_ZOOM) // walking scale
       map.controller.setCenter(known.toGeoPoint())
@@ -1742,7 +1797,7 @@ class MainActivity :
   }
 
   private fun aboveAreaAndTrack(): Int =
-      map.overlays.indexOfLast { isAreaLayer(it) || (it is Polyline && it.id == TRACK_ID) } + 1
+      map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || (it is Polyline && it.id == TRACK_ID) } + 1
 
   private var drawnTrackSerial = -1
   /** The segment being walked right now; new points are appended to it. */
@@ -1789,7 +1844,7 @@ class MainActivity :
     trackTail = null
     trackToArrow = null
     trackHeld.clear()
-    val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
+    val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
     val all = viewModel.trackSnapshot()
     // Only up to where the arrow is; the rest waits for it
     val reached = trackReachedT()
@@ -1828,7 +1883,7 @@ class MainActivity :
       val p = GeoPoint(lp.lat, lp.lon)
       val tail = trackTail
       if (newSegment || tail == null) {
-        val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
+        val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
         trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
       } else tail.addPoint(p)
       trackLastDrawn = lp
@@ -1853,7 +1908,7 @@ class MainActivity :
     val line = trackToArrow
     if (line != null) line.setPoints(ends)
     else {
-      val at = map.overlays.indexOfLast { isAreaLayer(it) } + 1
+      val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
       trackToArrow = trackLine(ends).also { map.overlays.add(at, it) }
     }
   }
