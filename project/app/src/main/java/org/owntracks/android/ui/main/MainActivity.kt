@@ -94,6 +94,7 @@ class MainActivity :
   @Inject lateinit var preferences: Preferences
   @Inject lateinit var folloDiagRepo: FolloDiagRepo
   @Inject lateinit var folloGridRepo: org.owntracks.android.data.repos.FolloGridRepo
+  @Inject lateinit var folloDrawRepo: org.owntracks.android.data.repos.FolloDrawRepo
   @Inject lateinit var folloOfflineRepo: org.owntracks.android.data.repos.FolloOfflineRepo
   @Inject lateinit var requirementsChecker: RequirementsChecker
   @Inject lateinit var notificationsStash: NotificationsStash
@@ -358,6 +359,7 @@ class MainActivity :
             map.invalidate()
           }
         }
+        launch { folloDrawRepo.draw.collect(::showDrawings) }
         launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         launch {
@@ -449,6 +451,7 @@ class MainActivity :
     // Offline map + search grids (10 Nov 2026): look again whenever the app comes forward
     folloOfflineRepo.kick()
     folloGridRepo.refresh()
+    folloDrawRepo.refresh() // base camp's drawings for this phone (12 Nov 2026)
     // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
     // circles for any search in the next 14 days. Sent once the screen has a fix better than 100 m.
     if (preferences.setupCompleted && requirementsChecker.hasLocationPermissions()) {
@@ -1054,6 +1057,8 @@ class MainActivity :
 
   /** The search grids, under everything else the app draws on the map. */
   private var gridOverlay: FolloGridOverlay? = null
+  /** Base camp's drawings for this phone (12 Nov 2026): just above the search grids, under everything else. */
+  private var drawOverlay: FolloDrawOverlay? = null
 
   /** The card's third line: how far the offline map is. Only the waiting line takes a tap. */
   private fun renderOffline(s: org.owntracks.android.data.repos.FolloOfflineRepo.State) {
@@ -1198,6 +1203,13 @@ class MainActivity :
           it.ownTeam = viewModel.folloStatus.value?.message?.team
           map.overlays.add(0, it)
         }
+    // Base camp's drawings (12 Nov 2026): straight after the grids, so they lie over them and under the track, the
+    // circles, teammates, markers and the phone's own arrow
+    drawOverlay =
+        FolloDrawOverlay(resources.displayMetrics.density, resources.displayMetrics.density * resources.configuration.fontScale).also {
+          map.overlays.add(1, it)
+        }
+    showDrawings(folloDrawRepo.draw.value)
     // Until the first fix: the phone's own fix if there is one, else the last position Android already holds (read from
     // its cache, no new fix taken, never sent: only the map uses it) at walking scale, else the Australia overview
     // (9 Nov 2026, Greg G: the app opened on a George Town street, grey where the imagery stops, before his first fix)
@@ -1797,7 +1809,7 @@ class MainActivity :
   }
 
   private fun aboveAreaAndTrack(): Int =
-      map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || (it is Polyline && it.id == TRACK_ID) } + 1
+      map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay || (it is Polyline && it.id == TRACK_ID) } + 1
 
   private var drawnTrackSerial = -1
   /** The segment being walked right now; new points are appended to it. */
@@ -1844,7 +1856,7 @@ class MainActivity :
     trackTail = null
     trackToArrow = null
     trackHeld.clear()
-    val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
+    val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
     val all = viewModel.trackSnapshot()
     // Only up to where the arrow is; the rest waits for it
     val reached = trackReachedT()
@@ -1883,7 +1895,7 @@ class MainActivity :
       val p = GeoPoint(lp.lat, lp.lon)
       val tail = trackTail
       if (newSegment || tail == null) {
-        val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
+        val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
         trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
       } else tail.addPoint(p)
       trackLastDrawn = lp
@@ -1908,7 +1920,7 @@ class MainActivity :
     val line = trackToArrow
     if (line != null) line.setPoints(ends)
     else {
-      val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay } + 1
+      val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
       trackToArrow = trackLine(ends).also { map.overlays.add(at, it) }
     }
   }
@@ -2011,6 +2023,45 @@ class MainActivity :
     map.invalidate()
   }
 
+  /**
+   * Base camp's drawings for this phone (12 Nov 2026, docs/DRAW_20261112.md §3): lines, areas, circles and labels in
+   * their own layer ([FolloDrawOverlay]); a pin is a marker exactly like a live-map marker ([addRegion]). Display only.
+   */
+  private fun showDrawings(draw: FolloDraw?) {
+    if (!::map.isInitialized) return
+    val layer = drawOverlay ?: return
+    layer.show(draw, map)
+    map.overlays.removeAll { it is Marker && it.id.startsWith(DRAW_PREFIX) }
+    for (d in draw?.items.orEmpty()) {
+      if (d.kind != FolloDraw.Kind.PIN) continue
+      val point = GeoPoint(d.pts[0], d.pts[1])
+      map.overlays.add(
+          Marker(map).apply {
+            id = DRAW_PREFIX + d.id
+            position = point
+            icon = ResourcesCompat.getDrawable(resources, R.drawable.ic_follo_pin, null)
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            infoWindow = null
+          },
+      )
+      if (d.text != null)
+          map.overlays.add(
+              Marker(map).apply {
+                id = DRAW_PREFIX + d.id + LABEL_SUFFIX
+                position = point
+                setTextIcon(d.text)
+                setTextLabelBackgroundColor(Color.argb(184, 0, 0, 0))
+                setTextLabelForegroundColor(Color.WHITE)
+                setTextLabelFontSize((12 * resources.displayMetrics.scaledDensity).roundToInt())
+                setAnchor(Marker.ANCHOR_CENTER, -0.15f)
+                infoWindow = null
+              },
+          )
+    }
+    keepOwnOnTop()
+    map.invalidate()
+  }
+
   private fun removeRegion(w: WaypointModel) {
     val ids = setOf(REGION_PREFIX + w.id, REGION_PREFIX + w.id + LABEL_SUFFIX)
     map.overlays.removeAll { (it is Marker && it.id in ids) || (it is Polygon && it.id in ids) }
@@ -2069,6 +2120,7 @@ class MainActivity :
 
   companion object {
     private const val REGION_PREFIX = "region-"
+    private const val DRAW_PREFIX = "draw-" // pins among base camp's drawings (12 Nov 2026)
     private const val AREA_ID = "follo-area"
     private const val AREA_EDGE_ID = "follo-area-edge"
     private const val GEOFENCE_ID = "follo-geofence"

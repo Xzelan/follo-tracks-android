@@ -545,7 +545,7 @@ constructor(
   /** FOLLO: the server answered 401/403 (review 28 Oct 2026, B2): the banner goes red until a send gets through. */
   fun onServerRejected(code: Int) {
     Timber.w("Server rejected this phone with HTTP $code")
-    folloStatusRepo.setRejected(true)
+    folloStatusRepo.setRejected(true, code)
   }
 
   fun onMessageDeliveryFailedFinal(message: MessageBase) {

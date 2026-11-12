@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.34" // 10 Nov 2026: offline map inside the circles + the search grids on the map (a fallback if QField fails)
+val versionNameValue = "0.1.35" // 12 Nov 2026: base camp's drawings on the map (lines, areas, circles, pins, labels for chosen phones)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026

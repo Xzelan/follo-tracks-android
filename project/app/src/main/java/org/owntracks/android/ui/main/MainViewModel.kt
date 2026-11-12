@@ -57,6 +57,7 @@ constructor(
     endpointStateRepo: EndpointStateRepo,
     private val folloStatusRepo: FolloStatusRepo,
     private val folloTrackRepo: FolloTrackRepo,
+    private val folloDrawRepo: org.owntracks.android.data.repos.FolloDrawRepo,
     private val deviceMetricsProvider: DeviceMetricsProvider,
     private val parser: Parser,
     @param:CoroutineScopes.IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -257,6 +258,7 @@ constructor(
       if (config.waypoints.isNotEmpty()) waypointsRepo.importFromMessage(config.waypoints)
       (config["folloName"] as? String)?.let { preferences.displayName = it }
       folloTrackRepo.clear() // a new setup starts a clean track
+      folloDrawRepo.clear() // and holds none of the drawings sent to whoever this phone was set up as before (12 Nov 2026)
       folloStatusRepo.setRejected(false) // and a clean slate with the server
       preferences.setupCompleted = true
       setupCompleted.value = true

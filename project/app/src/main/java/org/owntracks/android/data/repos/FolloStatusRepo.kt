@@ -30,7 +30,11 @@ constructor(@ApplicationContext context: Context, private val parser: Parser) {
    */
   val rejected = MutableStateFlow(false)
 
-  fun setRejected(value: Boolean) {
+  /** The HTTP code of that refusal (401 = the password is no longer good, 403), 0 while the server accepts the phone. */
+  val rejectedCode = MutableStateFlow(0)
+
+  fun setRejected(value: Boolean, code: Int = 0) {
+    rejectedCode.value = if (value) code else 0
     if (rejected.value != value) rejected.value = value
   }
 

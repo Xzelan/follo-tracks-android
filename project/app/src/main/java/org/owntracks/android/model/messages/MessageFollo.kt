@@ -39,6 +39,12 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    */
   var gridv: String? = null
   /**
+   * Version of the drawings base camp put on THIS phone's map (12 Nov 2026), "0" = none. The drawings themselves come
+   * from GET /draw when this differs from the version the phone holds (FolloDrawRepo). Null = an older server, or the
+   * server could not tell just now: the phone keeps what it has.
+   */
+  var drawv: String? = null
+  /**
    * Offline map (10 Nov 2026): which areas' circles to save imagery for and how much. Null = save nothing (what is
    * saved already stays).
    */
