@@ -102,6 +102,41 @@ class FolloDrawTest {
     assertEquals(FolloDraw.LABEL_MAX, d.items[2].text!!.length)
   }
 
+  // 13 Nov 2026: widths in metres on the ground, and background lines without the white casing
+  @Test
+  fun `a width in metres and no casing are read, and left alone when absent or rubbish`() {
+    val d =
+        FolloDraw.parse(
+                """{"v":"x","items":[
+                  {"id":1,"k":"line","p":[-41,146,-41.1,146.1],"w":2,"wm":1,"nc":1},
+                  {"id":2,"k":"line","p":[-41,146,-41.1,146.1]},
+                  {"id":3,"k":"line","p":[-41,146,-41.1,146.1],"wm":5000,"nc":0},
+                  {"id":4,"k":"line","p":[-41,146,-41.1,146.1],"wm":-2,"nc":true},
+                  {"id":5,"k":"poly","p":[-41,146,-41.1,146.1,-41.2,146],"wm":0.01},
+                  {"id":6,"k":"line","p":[-41,146,-41.1,146.1],"wm":"wide"}
+                ]}""")!!
+            .items
+    assertEquals(6, d.size)
+    assertEquals(1f, d[0].metres, 0f)
+    assertFalse(d[0].casing)
+    assertEquals("the dp width stays for builds that do not know metres", 2f, d[0].width, 0f)
+    assertEquals(0f, d[1].metres, 0f)
+    assertTrue(d[1].casing)
+    assertEquals("no wider than 100 m", 100f, d[2].metres, 0f)
+    assertTrue(d[2].casing)
+    assertEquals("a width that is not one means the dp width", 0f, d[3].metres, 0f)
+    assertFalse(d[3].casing)
+    assertEquals("no thinner than 0.1 m", 0.1f, d[4].metres, 0f)
+    assertEquals(0f, d[5].metres, 0f)
+  }
+
+  @Test
+  fun `a ground width follows the zoom and never goes under the hairline`() {
+    assertEquals(12f, FolloDrawOverlay.groundPx(2f, 6f, 2f), 0.0001f) // 2 m at 6 px a metre
+    assertEquals(1f, FolloDrawOverlay.groundPx(1f, 0.2f, 2f), 0.0001f) // 0.2 px would vanish: half a dp instead
+    assertEquals(1f, FolloDrawOverlay.groundPx(1f, Float.NaN, 2f), 0.0001f)
+  }
+
   @Test
   fun `a circle's ring is the ground circle`() {
     for ((lat, lon, r) in listOf(Triple(-41.05, 146.8, 150.0), Triple(-27.6, 153.1, 2500.0), Triple(-43.1, 147.9, 25.0))) {

@@ -15,8 +15,8 @@ import kotlinx.serialization.json.doubleOrNull
 /**
  * The drawings base camp put on THIS phone's map (Alex, 12 Nov 2026: "we will need to be able to draw lines, etc. on
  * the phone"; docs/DRAW_20261112.md §2–3; the same on iOS): lines, areas, circles, pins and labels. The body of
- * GET /draw: `{"v", "items": [{"id", "k": line|poly|circle|pin|text, "p": [lat,lon,…], "r", "c", "w", "f", "d",
- * "t"}]}`. An item of a kind this build does not know, or with a malformed piece, is skipped, never fatal. Display only.
+ * GET /draw: `{"v", "items": [{"id", "k": line|poly|circle|pin|text, "p": [lat,lon,…], "r", "c", "w", "wm", "nc",
+ * "f", "d", "t"}]}`. An item of a kind this build does not know, or with a malformed piece, is skipped, never fatal. Display only.
  */
 class FolloDraw(val v: String, val items: List<Item>) {
   enum class Kind { LINE, POLY, CIRCLE, PIN, TEXT }
@@ -33,6 +33,10 @@ class FolloDraw(val v: String, val items: List<Item>) {
       val radius: Double,
       val color: Int,
       val width: Float,
+      /** Width in metres on the ground (13 Nov 2026), 0 = [width] in dp instead: the line is this wide at every zoom. */
+      val metres: Float,
+      /** A solid line lies on a white casing unless base camp said not to (a background line, like old tracklogs). */
+      val casing: Boolean,
       val fill: Float,
       val dashed: Boolean,
       val text: String?,
@@ -52,6 +56,8 @@ class FolloDraw(val v: String, val items: List<Item>) {
     const val DEFAULT_WIDTH = 3f
     const val WIDTH_MIN = 1f
     const val WIDTH_MAX = 12f
+    const val METRES_MIN = 0.1f
+    const val METRES_MAX = 100f
     const val RADIUS_MAX_M = 500_000.0 // a circle wider than this is not drawn
     const val LABEL_MAX = 60
     private const val EARTH_M = 6371008.8 // mean radius, the sphere the server's circles are measured on
@@ -190,6 +196,8 @@ class FolloDraw(val v: String, val items: List<Item>) {
           radius = radius,
           color = color(o["c"].str()),
           width = (o["w"].num()?.toFloat() ?: DEFAULT_WIDTH).takeIf { it.isFinite() }?.coerceIn(WIDTH_MIN, WIDTH_MAX) ?: DEFAULT_WIDTH,
+          metres = o["wm"].num()?.toFloat()?.takeIf { it.isFinite() && it > 0f }?.coerceIn(METRES_MIN, METRES_MAX) ?: 0f,
+          casing = !((o["nc"].num() ?: 0.0) != 0.0 || (o["nc"] as? JsonPrimitive)?.content == "true"),
           fill = if (kind == Kind.POLY || kind == Kind.CIRCLE) (o["f"].num()?.toFloat() ?: 0f).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f else 0f,
           dashed = (o["d"].num() ?: 0.0) != 0.0 || (o["d"] as? JsonPrimitive)?.content == "true",
           text = text,

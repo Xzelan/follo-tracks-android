@@ -22,14 +22,20 @@ import org.osmdroid.views.overlay.Polyline
  * activity like a live-map marker. At every zoom. Display only: this overlay takes no touches and hands none to the
  * shapes it holds.
  *
- * A solid line lies on a white casing ([CASING_ALPHA], [CASING_EXTRA_DP] wider); a dashed one ([DASH_DP] on,
- * [GAP_DP] off, butt ends) has none. An area or circle is filled in its colour at the item's opacity when it asks for one.
+ * A solid line lies on a white casing ([CASING_ALPHA], [CASING_EXTRA_DP] wider) unless the item says not to (`nc`,
+ * a background line such as old tracklogs); a dashed one ([DASH_DP] on, [GAP_DP] off, butt ends) has none. A width
+ * given in metres (`wm`, 13 Nov 2026: Alex, "1 metre at scale", like the map-unit lines of the QGIS projects) is that
+ * wide on the ground at every zoom, never thinner on the screen than [GROUND_MIN_DP]. An area or circle is filled in its colour at the item's opacity when it asks for one.
  * The shapes are osmdroid's own line and area objects (they clip to the screen at any zoom), drawn in the order sent.
  */
 class FolloDrawOverlay(private val density: Float, scaledDensity: Float) : Overlay() {
   private class Tag(val lat: Double, val lon: Double, val text: String, val color: Int)
 
+  /** A stroke whose width is metres on the ground: set afresh for the zoom at every draw ([extraDp] = the casing's). */
+  private class Ground(val paint: Paint, val metres: Float, val extraDp: Float)
+
   private var shapes: List<Overlay> = emptyList()
+  private var grounds: List<Ground> = emptyList()
   private var tags: List<Tag> = emptyList()
 
   private val tagFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.BLACK; alpha = FolloGridOverlay.TAG_ALPHA }
@@ -47,19 +53,21 @@ class FolloDrawOverlay(private val density: Float, scaledDensity: Float) : Overl
   /** Show this set (null or empty = nothing). Pins are left to the caller. */
   fun show(draw: FolloDraw?, map: MapView) {
     val made = mutableListOf<Overlay>()
+    val sized = mutableListOf<Ground>()
     val labels = mutableListOf<Tag>()
     for (it in draw?.items.orEmpty()) {
+      val cased = !it.dashed && it.casing
       when (it.kind) {
         FolloDraw.Kind.LINE -> {
           val pts = geo(it.outline)
-          if (!it.dashed) made += line(map, pts, Color.WHITE, it.width + CASING_EXTRA_DP, CASING_ALPHA, false)
-          made += line(map, pts, it.color, it.width, 255, it.dashed)
+          if (cased) made += line(map, pts, Color.WHITE, it.width + CASING_EXTRA_DP, CASING_ALPHA, false).also { l -> ground(sized, l.outlinePaint, it, CASING_EXTRA_DP) }
+          made += line(map, pts, it.color, it.width, 255, it.dashed).also { l -> ground(sized, l.outlinePaint, it, 0f) }
         }
         FolloDraw.Kind.POLY, FolloDraw.Kind.CIRCLE -> {
           val pts = geo(it.outline).let { ring -> ring + ring.first() }
-          if (!it.dashed) made += area(map, pts, Color.WHITE, it.width + CASING_EXTRA_DP, CASING_ALPHA, false, Color.TRANSPARENT)
+          if (cased) made += area(map, pts, Color.WHITE, it.width + CASING_EXTRA_DP, CASING_ALPHA, false, Color.TRANSPARENT).also { a -> ground(sized, a.outlinePaint, it, CASING_EXTRA_DP) }
           val fill = if (it.fill > 0f) withAlpha(it.color, (it.fill * 255).roundToInt()) else Color.TRANSPARENT
-          made += area(map, pts, it.color, it.width, 255, it.dashed, fill)
+          made += area(map, pts, it.color, it.width, 255, it.dashed, fill).also { a -> ground(sized, a.outlinePaint, it, 0f) }
         }
         FolloDraw.Kind.PIN -> Unit // a marker, drawn by the activity
         FolloDraw.Kind.TEXT -> Unit // its tag only, below
@@ -67,11 +75,20 @@ class FolloDrawOverlay(private val density: Float, scaledDensity: Float) : Overl
       if (it.kind != FolloDraw.Kind.PIN && it.text != null) labels += Tag(it.labelLat, it.labelLon, it.text, it.color)
     }
     shapes = made
+    grounds = sized
     tags = labels
+  }
+
+  private fun ground(into: MutableList<Ground>, paint: Paint, item: FolloDraw.Item, extraDp: Float) {
+    if (item.metres > 0f) into += Ground(paint, item.metres, extraDp)
   }
 
   override fun draw(c: Canvas, p: Projection) {
     if (shapes.isEmpty() && tags.isEmpty()) return
+    if (grounds.isNotEmpty()) {
+      val pxPerMetre = p.metersToPixels(1f, p.currentCenter.latitude, p.zoomLevel)
+      for (g in grounds) g.paint.strokeWidth = groundPx(g.metres, pxPerMetre, density) + g.extraDp * density
+    }
     for (s in shapes) s.draw(c, p)
     if (tags.isEmpty() || !c.getClipBounds(clip)) return
     for (t in tags) drawTag(c, p, t)
@@ -89,14 +106,14 @@ class FolloDrawOverlay(private val density: Float, scaledDensity: Float) : Overl
     paint.pathEffect = if (dashed) DashPathEffect(floatArrayOf(DASH_DP * density, GAP_DP * density), 0f) else null
   }
 
-  private fun line(map: MapView, pts: List<GeoPoint>, color: Int, widthDp: Float, alpha: Int, dashed: Boolean): Overlay =
+  private fun line(map: MapView, pts: List<GeoPoint>, color: Int, widthDp: Float, alpha: Int, dashed: Boolean): Polyline =
       Polyline(map, true).apply { // as one path: round joins, and a dash pattern that runs on through the corners
         setPoints(pts)
         stroke(outlinePaint, color, widthDp, alpha, dashed)
         infoWindow = null
       }
 
-  private fun area(map: MapView, pts: List<GeoPoint>, color: Int, widthDp: Float, alpha: Int, dashed: Boolean, fill: Int): Overlay =
+  private fun area(map: MapView, pts: List<GeoPoint>, color: Int, widthDp: Float, alpha: Int, dashed: Boolean, fill: Int): Polygon =
       Polygon(map).apply {
         points = pts
         stroke(outlinePaint, color, widthDp, alpha, dashed)
@@ -128,5 +145,11 @@ class FolloDrawOverlay(private val density: Float, scaledDensity: Float) : Overl
     const val CASING_ALPHA = 179 // 70 %
     const val DASH_DP = 10f
     const val GAP_DP = 6f
+    /** A width in metres never shows thinner than this, so a zoomed-out map keeps a hairline (the same on iOS). */
+    const val GROUND_MIN_DP = 0.5f
+
+    /** Screen pixels for a line [metres] wide on the ground, at [pxPerMetre] for the zoom and place shown. */
+    fun groundPx(metres: Float, pxPerMetre: Float, density: Float): Float =
+        (metres * pxPerMetre).takeIf { it.isFinite() }?.coerceAtLeast(GROUND_MIN_DP * density) ?: (GROUND_MIN_DP * density)
   }
 }
