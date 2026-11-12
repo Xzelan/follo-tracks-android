@@ -77,6 +77,7 @@
     <string name="follo_battery">Battery %1$d%%</string>
     <string name="follo_waiting">%1$d waiting to send</string>
     <string name="follo_recentre">Recentre the map on you</string>
+    <string name="follo_recentre_hint">Recentre</string>
     <string name="follo_notif_standby">FOLLO Tracks: standing by</string>
     <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
     <string name="follo_area_label">Search area</string>

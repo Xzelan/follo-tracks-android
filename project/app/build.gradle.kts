@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.35" // 12 Nov 2026: base camp's drawings on the map (lines, areas, circles, pins, labels for chosen phones)
+val versionNameValue = "0.1.36" // 13 Nov 2026: a map moved or zoomed by hand stays put until the card is tapped; the card says "Recentre"
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026

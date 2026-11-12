@@ -160,6 +160,20 @@ class FolloRulesTest {
     assertTrue(FolloRules.outHelloDue(1_000L, 1_000L + 15 * 60_000L))
   }
 
+  // The held map (13 Nov 2026)
+  @Test
+  fun `a drag, a pinch, a turn or a double tap holds the map until the card is tapped`() {
+    assertTrue(FolloRules.holdsMap(dragged = true, pinched = false, turned = false, doubleTap = false))
+    assertTrue(FolloRules.holdsMap(dragged = false, pinched = true, turned = false, doubleTap = false))
+    assertTrue(FolloRules.holdsMap(dragged = false, pinched = false, turned = true, doubleTap = false))
+    assertTrue(FolloRules.holdsMap(dragged = false, pinched = false, turned = false, doubleTap = true))
+  }
+
+  @Test
+  fun `a plain tap on the map holds nothing`() {
+    assertFalse(FolloRules.holdsMap(dragged = false, pinched = false, turned = false, doubleTap = false))
+  }
+
   // Search windows (1 Nov 2026)
   private val mv = FolloRules.Circle(-41.1, 146.8, 300.0, "MV")
   private val cb = FolloRules.Circle(-40.8, 145.1, 300.0, "CB")

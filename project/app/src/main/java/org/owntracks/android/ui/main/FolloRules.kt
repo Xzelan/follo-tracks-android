@@ -31,6 +31,16 @@ object FolloRules {
     return clean
   }
 
+  /**
+   * Whether a touch on the map holds it where the volunteer left it (Alex 13 Nov 2026, after Jon E: "it always takes you
+   * back to your current location"): any move, zoom or turn made by hand does, and the map then stays put, at that
+   * zoom, until the card (or the banner) is tapped. A plain tap changes nothing, so it holds nothing.
+   * [dragged] = one finger moved the map, [pinched] = two fingers moved or zoomed it, [turned] = a two-finger twist
+   * turned it, [doubleTap] = the double tap that zooms in.
+   */
+  fun holdsMap(dragged: Boolean, pinched: Boolean, turned: Boolean, doubleTap: Boolean): Boolean =
+      dragged || pinched || turned || doubleTap
+
   /** Whether a leader's last fix (epoch seconds) is recent enough to show. */
   fun leaderFresh(lastFixS: Long, nowS: Long): Boolean = nowS - lastFixS <= LEADER_STALE_S
 

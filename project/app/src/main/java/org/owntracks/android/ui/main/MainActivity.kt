@@ -1108,9 +1108,11 @@ class MainActivity :
     }
     map.overlayManager.tilesOverlay = ShiftedTilesOverlay(map.tileProvider, this) // Esri sits 1.5 m north
     map.setMultiTouchControls(true)
-    // A one-finger drag means the volunteer is looking somewhere else: stop following until the card is
-    // tapped. A pinch (any second finger during the touch) keeps following and keeps its zoom; the decision
-    // is made when the fingers lift, so a pinch that starts one-fingered does not pause (review 21 Oct 2026).
+    // Any move, zoom or turn made by hand means the volunteer is looking somewhere else: stop following, and
+    // leave the map there at that zoom, until the card is tapped (Alex 13 Nov 2026; until then a pinch kept
+    // following, so zooming in on another spot threw the map back to the arrow). That is a one-finger drag, a
+    // pinch that moved or zoomed the map, a twist, or the double tap that zooms in; a plain tap holds nothing.
+    // The decision is made when the fingers lift (FolloRules.holdsMap).
     // A two-finger twist (Alex 24 Oct 2026: "rotate the map using 2 fingers, just like Google Maps") turns the
     // map once it passes ROTATE_START_DEG, so a pinch is not turned by accident, and holds it turned like a drag
     // does. It turns about the fingers: osmdroid's pinch keeps the point under them fixed whatever the turn.
@@ -1118,12 +1120,22 @@ class MainActivity :
     var downX = 0f
     var downY = 0f
     var dragged = false
-    var twoFingers = false
     var lastAngle = 0f
     var twist = 0f
     var rotating = false
     var rotated = false
     var rebase = false
+    var pinched = false
+    var pinchStart = false
+    var span0 = 0f
+    var focusX0 = 0f
+    var focusY0 = 0f
+    var doubleTap = false
+    var lastUpAt = 0L
+    var lastUpX = 0f
+    var lastUpY = 0f
+    val doubleTapMs = android.view.ViewConfiguration.getDoubleTapTimeout().toLong()
+    val doubleTapSlop = android.view.ViewConfiguration.get(this).scaledDoubleTapSlop
     fun fingerAngle(e: android.view.MotionEvent) =
         Math.toDegrees(kotlin.math.atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat()
     val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
@@ -1133,15 +1145,17 @@ class MainActivity :
           downX = e.x
           downY = e.y
           dragged = false
-          twoFingers = false
           rotating = false
           rotated = false
+          pinched = false
           twist = 0f
+          // the second tap of a double tap (osmdroid zooms in on it): same test as the system's gesture detector
+          doubleTap = e.eventTime - lastUpAt <= doubleTapMs && hypot(e.x - lastUpX, e.y - lastUpY) <= doubleTapSlop
           gestureActive = true
         }
         android.view.MotionEvent.ACTION_POINTER_DOWN -> {
-          twoFingers = true
           rebase = true
+          pinchStart = true
         }
         // the finger pair changes: measure the twist afresh from the next move
         android.view.MotionEvent.ACTION_POINTER_UP -> rebase = true
@@ -1149,6 +1163,16 @@ class MainActivity :
             if (e.pointerCount == 1) {
               if (hypot(e.x - downX, e.y - downY) > slop) dragged = true
             } else {
+              // two fingers that only rest on the map change nothing; past the slop they have moved or zoomed it
+              val span = hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0))
+              val focusX = (e.getX(0) + e.getX(1)) / 2f
+              val focusY = (e.getY(0) + e.getY(1)) / 2f
+              if (pinchStart) {
+                span0 = span
+                focusX0 = focusX
+                focusY0 = focusY
+                pinchStart = false
+              } else if (abs(span - span0) > slop || hypot(focusX - focusX0, focusY - focusY0) > slop) pinched = true
               val a = fingerAngle(e)
               if (rebase) {
                 lastAngle = a
@@ -1169,14 +1193,17 @@ class MainActivity :
             }
         android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
           gestureActive = false
-          if ((dragged && !twoFingers) || rotated) followPaused = true
-          if (camera == Camera.NAV) requestNavFrame() // arrow back on its spot at the new zoom, or turned on the held map
+          lastUpAt = e.eventTime
+          lastUpX = e.x
+          lastUpY = e.y
+          if (FolloRules.holdsMap(dragged, pinched, rotated, doubleTap)) followPaused = true
+          if (camera == Camera.NAV) requestNavFrame() // the arrow turned to suit the held map, or back on its spot
         }
       }
       false
     }
-    // A pinch zooms about the fingers; put the arrow back on its spot for the new scale. The credit follows the
-    // imagery at the middle of the map (5 Nov 2026).
+    // While following, a zoom the app makes puts the arrow back on its spot for the new scale. The credit follows
+    // the imagery at the middle of the map (5 Nov 2026).
     map.addMapListener(
         object : org.osmdroid.events.MapListener {
           override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
@@ -1623,8 +1650,16 @@ class MainActivity :
   }
 
   private var centredOnce = false
-  /** True once the volunteer drags or turns the map themselves; tapping the card or banner brings following back. */
+  /**
+   * True once the volunteer moves, zooms or turns the map themselves; tapping the card or banner brings following
+   * back. While it is true the card says "Recentre" (the whole card is the button, the words only say so).
+   */
   private var followPaused = false
+    set(value) {
+      if (field == value) return
+      field = value
+      if (::binding.isInitialized) binding.recentre.visibility = if (value) android.view.View.VISIBLE else android.view.View.GONE
+    }
   /** True while a finger is on the map: the camera does not move it under the finger. */
   private var gestureActive = false
 
@@ -1661,12 +1696,14 @@ class MainActivity :
     map.controller.animateTo(c, null, PAN_MS)
   }
 
-  /** Card or banner tap: follow again, heading-up, with the arrow back on its spot. */
+  /** Card or banner tap: follow again, heading-up, at walking scale, with the arrow back on its spot. */
   private fun recentre() {
     followPaused = false
     if (camera == Camera.NAV) requestNavFrame() // the compass turns the map back even before the next fix
     val l = viewModel.currentLocation.value ?: return
     if (!::map.isInitialized || map.width == 0) return
+    // the zoom goes back too: whatever was pinched while looking elsewhere is not the walking view (13 Nov 2026)
+    if (map.zoomLevelDouble != START_ZOOM) map.controller.setZoom(START_ZOOM)
     // Forget the last accepted fix, so the current style places the dot afresh (heading-up styles
     // included, which a plain north-up re-centre would undo).
     camRef = null

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Back to where I am": a ring with a dot and four ticks, beside the card's Recentre (13 Nov 2026) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="18dp" android:height="18dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#1E6B3A" android:strokeWidth="2.2"
+        android:pathData="M12,5 a7,7 0 1,0 0.01,0 Z" />
+    <path android:fillColor="#1E6B3A" android:pathData="M12,9 a3,3 0 1,0 0.01,0 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#1E6B3A" android:strokeWidth="2.2" android:strokeLineCap="round"
+        android:pathData="M12,1.5 V5 M12,19 V22.5 M1.5,12 H5 M19,12 H22.5" />
+</vector>
