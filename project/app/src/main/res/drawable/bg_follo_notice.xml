@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "No search area loaded yet" notice above the card: amber, 12 dp corners (13 Nov 2026; the same on iOS) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/follo_amber" />
+    <corners android:radius="12dp" />
+</shape>

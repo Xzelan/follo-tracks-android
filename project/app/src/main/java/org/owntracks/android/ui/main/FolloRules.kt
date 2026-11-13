@@ -105,6 +105,13 @@ object FolloRules {
         "${d.toInt()}-${m.toInt()}-$y"
       }
 
+  /** The circles' day on the bottom line (13 Nov 2026): [readyUpdate] with dots, "9.11.2026"; the same on iOS. */
+  fun circlesDay(descriptions: List<String>): String? = readyUpdate(descriptions)?.replace('-', '.')
+
+  /** The server's clock, short enough for the banner's one line: "5:00 pm" -> "5pm", "5:30 pm" -> "5:30pm". */
+  fun shortClock(clock: String?): String =
+      (clock ?: "").trim().replace(":00", "").replace(" am", "am").replace(" pm", "pm")
+
   // ── "No fix on open" (Alex, 1 Nov 2026) ─────────────────────────────────────────────────
   // A check-in that the phone makes by itself (app opened, base camp's check-in push, new push token) only sends a
   // position when the phone is INSIDE a held wake-up circle (search circles and the Basecamp circle alike) or inside

@@ -12,8 +12,12 @@
 
     <string name="follo_sharing_title">Sharing your location with FOLLO</string>
     <string name="follo_sharing_sub"> </string>
-    <string name="follo_offline_sub">No signal. %1$d positions saved, sent when back in range</string>
-    <string name="follo_offline_sub_one">No signal. 1 position saved, sent when back in range</string>
+    <!-- 13 Nov 2026 (Alex's list on the "FOLLO Tracks Wording" page): the green banner is one line with when sharing
+         ends ("until 5pm"), with or without signal; follo_sharing_title stays as the notification's title -->
+    <string name="follo_sharing_now">Sharing location with FOLLO</string>
+    <string name="follo_sharing_until">Sharing location with FOLLO until %1$s</string>
+    <string name="follo_offline_sub">No signal, %1$d positions to send when it returns</string>
+    <string name="follo_offline_sub_one">No signal, 1 position to send when it returns</string>
     <!-- 28 Oct 2026 review B10: amber while inside the area but not actually tracking; same words on iOS -->
     <string name="follo_waiting_title">Waiting for FOLLO to start tracking</string>
     <string name="follo_waiting_sub">Press and hold the card below to check in now</string>
@@ -25,15 +29,16 @@
     <!-- 28 Oct 2026 review B13: a phone already inside the area when the hours start gets no enter event, so it only
          starts on its next post (e.g. the check-in when the app is opened) -->
     <string name="follo_standby_sub">Sharing starts when you enter the search area in search hours, or when you open the app inside it</string>
-    <string name="follo_standby_outside_title">Standing by: outside the search area</string>
-    <string name="follo_standby_outside_sub">Only shares when inside search area and time</string>
+    <!-- 13 Nov 2026: one line, no second line of its own (the server's line, when it sends one, still goes under) -->
+    <string name="follo_standby_outside_title">Waiting until you\'re in the search area</string>
     <!-- Under Standing by: which searches' wake-up circles the phone holds (Alex 25 Oct 2026; same wording on iOS) -->
     <string name="follo_ready_for">✓ Ready for %1$s</string>
     <!-- 1 Nov 2026 Edit Circles: appended to the Ready line when the held wake circles carry a date (4th word of
          their name, yyyy-mm-dd) — shown d-M-yyyy, newest date wins; same wording on iOS -->
     <string name="follo_ready_update">(%1$s update)</string>
     <!-- 28 Oct 2026 review B11: a check-in needs a fix better than 100 m, which indoors may never come -->
-    <string name="follo_ready_none">No search area loaded yet: go outside so the phone can check in</string>
+    <!-- 13 Nov 2026: a notice just above the card (it was the banner's last line) -->
+    <string name="follo_ready_none">No search area loaded yet: please go outside so the phone can check in</string>
     <string name="follo_standby_nosearch_title">Standing by: no search right now</string>
     <string name="follo_next_search">"Next search: %1$s. "</string>
     <string name="follo_nosearch_tail">FOLLO doesn\'t keep check-ins outside search hours</string>

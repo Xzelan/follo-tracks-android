@@ -108,6 +108,11 @@ class MainActivity :
   private var service: BackgroundService? = null
   private var bannerBasePaddingTop = 0
   private var cardBaseMarginBottom = 0
+  /** The navigation bar's height, for the foot of the screen (kept for applyOrientation) */
+  private var barsBottom = 0
+  /** Where on the card the finger last went down: a tap on the offline map's sign is not a "recentre" */
+  private var cardDownX = 0f
+  private var cardDownY = 0f
   private var state: Banner? = null
   /** True while a system permission prompt is up; the banner then says "Setting up" instead of red. */
   private var promptInFlight = false
@@ -125,6 +130,8 @@ class MainActivity :
       val title: String,
       val sub: String,
       val button: String? = null,
+      /** The second line already says how many positions wait, so the card does not repeat it (13 Nov 2026) */
+      val saysBacklog: Boolean = false,
   )
 
   private enum class Kind {
@@ -228,20 +235,19 @@ class MainActivity :
     FolloTileCache.configure(this) // before the layout: the MapView opens the tile cache as it is created
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
-    // 1 Nov 2026: the heading carries the version and build ("FOLLO Tracks 0.1.25 (1)") so a phone's build can be read
-    // off its screen at base camp.
-    binding.brand.text =
-        getString(R.string.follo_brand_version, getString(R.string.follo_brand), BuildConfig.VERSION_NAME, BuildConfig.FOLLO_BUILD)
+    // The version, so a phone's build can be read off its screen at base camp (1 Nov 2026). Since the compact screen of
+    // 13 Nov 2026 it is the last pill of the bottom line ("0.1.38", or "0.1.38 (2)" for a rebuild), not a heading.
+    binding.build.text =
+        if (BuildConfig.FOLLO_BUILD > 0) "${BuildConfig.VERSION_NAME} (${BuildConfig.FOLLO_BUILD})" else BuildConfig.VERSION_NAME
 
     bannerBasePaddingTop = binding.banner.paddingTop
-    cardBaseMarginBottom = (binding.card.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
+    cardBaseMarginBottom = binding.bottom.paddingBottom
     val creditBaseMarginBottom = (binding.creditBar.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
     ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
       val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+      barsBottom = bars.bottom
       binding.banner.updatePadding(top = bannerBasePaddingTop + bars.top)
-      binding.card.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
-        bottomMargin = cardBaseMarginBottom + bars.bottom
-      }
+      applyFoot()
       binding.creditBar.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
         bottomMargin = creditBaseMarginBottom + bars.bottom
       }
@@ -256,15 +262,23 @@ class MainActivity :
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
     binding.note.setOnClickListener { onNoteClicked() }
-    binding.offline.setOnClickListener { onOfflineClicked() }
-    binding.offline.isClickable = false // only the waiting line takes a tap; otherwise the card does (recentre)
 
     binding.action.setOnClickListener { onActionClicked() }
     // Power button (13 Nov 2026): hold 2 s = Off, one tap = on again
     binding.power.onTurnOff = { setPower(off = true) }
     binding.power.onTurnOn = { setPower(off = false) }
     binding.power.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
-    binding.card.setOnClickListener { recentre() }
+    // The card recentres; a tap on the offline map's sign (a small thing, so with room round it) says how the saving
+    // stands instead (13 Nov 2026)
+    @Suppress("ClickableViewAccessibility")
+    binding.card.setOnTouchListener { _, e ->
+      if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+        cardDownX = e.x
+        cardDownY = e.y
+      }
+      false
+    }
+    binding.card.setOnClickListener { if (onOfflineSign()) onOfflineClicked() else recentre() }
     binding.banner.setOnClickListener { recentre() } // top or bottom, either one brings the arrow back (Alex 24 Oct 2026)
     // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
     binding.card.setOnLongClickListener {
@@ -416,18 +430,28 @@ class MainActivity :
       width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
       height = if (land) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT
     }
-    binding.card.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
+    // the notice and the card: the side panel's width when the phone is sideways (the card is 288 dp plus its padding)
+    binding.bottom.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
       gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
     }
-    // the credit stays centred under the card, whichever side the card is on
+    // the bottom line runs under the card when upright, under the map (right of the side panel) when sideways
     binding.creditBar.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
-      gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
+      marginStart = (if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0) + (16 * resources.displayMetrics.density).toInt()
     }
     // the Off words sit in the part of the screen the map shows in: right of the side panel when the phone is sideways
     binding.offCover.updatePadding(left = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0)
-    binding.title.textSize = if (land) 22f else 26f
+    applyFoot()
+  }
+
+  /**
+   * How far the card stands off the bottom edge: upright it sits straight above the bottom line; sideways the line is
+   * under the map, not under the card, so the card only clears the edge.
+   */
+  private fun applyFoot() {
+    val land = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val base = if (land) (12 * resources.displayMetrics.density).toInt() else cardBaseMarginBottom
+    binding.bottom.updatePadding(bottom = base + barsBottom)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -512,7 +536,7 @@ class MainActivity :
       camAnim?.cancel()
       pendingCheckIn = null
       viewModel.saveTrack()
-      binding.creditBar.visibility = View.GONE
+      binding.credit.visibility = View.GONE // no map, no credit; the version stays
     } else {
       followPaused = false
       centredOnce = false
@@ -575,7 +599,7 @@ class MainActivity :
   private fun refreshWakeAreas(all: List<WaypointModel>) {
     drawGeofences(all)
     val areas = all.mapNotNull(::wakeAreaOf).distinct()
-    val update = FolloRules.readyUpdate(all.filter { wakeAreaOf(it) != null }.map { it.description })
+    val update = FolloRules.circlesDay(all.filter { wakeAreaOf(it) != null }.map { it.description })
     if (areas != wakeAreas || update != wakeUpdate) {
       wakeAreas = areas
       wakeUpdate = update
@@ -665,19 +689,6 @@ class MainActivity :
     keepOwnOnTop()
     map.invalidate()
   }
-
-  /**
-   * "✓ Ready for MV" / "No search area loaded yet", under Standing by; the same wording on iOS. Since 1 Nov 2026 (Edit
-   * Circles) " (1-11-2026 update)" follows when the circles carry a date, so base camp can see a phone has the latest.
-   */
-  private fun readyLine(): String =
-      "\n" +
-          when (wakeAreas.size) {
-            0 -> getString(R.string.follo_ready_none)
-            1 -> getString(R.string.follo_ready_for, wakeAreas[0])
-            else -> getString(R.string.follo_ready_for, wakeAreas.dropLast(1).joinToString(", ") + " and " + wakeAreas.last())
-          } +
-          (if (wakeAreas.isNotEmpty() && wakeUpdate != null) " " + getString(R.string.follo_ready_update, wakeUpdate) else "")
 
   override fun onPause() {
     compass.stop()
@@ -994,17 +1005,18 @@ class MainActivity :
               s(if (queued > 0) R.string.follo_waiting_nosignal_sub else R.string.follo_waiting_sub))
       if (queued == 0 && System.currentTimeMillis() - viewModel.lastSentAt.value > SENT_STALE_MS)
           return Banner(Kind.WAITING, amber, s(R.string.follo_waiting_fix_title), s(R.string.follo_waiting_fix_sub))
+      // Words from Alex's list of 13 Nov 2026: one line with when sharing ends, with or without signal; with no signal
+      // the second line counts what waits (the card no longer repeats it); the server's own line still goes under
+      val until = FolloRules.shortClock(server?.until)
+      val title = if (until.isEmpty()) s(R.string.follo_sharing_now) else getString(R.string.follo_sharing_until, until)
       val sub =
           when {
             queued == 1 -> s(R.string.follo_offline_sub_one)
             queued > 1 -> getString(R.string.follo_offline_sub, queued)
             !server?.line.isNullOrBlank() -> server!!.line!!
-            server?.search != null && server.until != null ->
-                getString(R.string.follo_until, server.search, server.until)
-            server?.search != null -> server.search!!
-            else -> s(R.string.follo_sharing_sub)
+            else -> ""
           }
-      return Banner(Kind.SHARING, green, s(R.string.follo_sharing_title), sub)
+      return Banner(Kind.SHARING, green, title, sub, saysBacklog = queued > 0)
     }
     return when (if (area != null || ring != null) "outside" else if (windowOver) null else server?.state) {
       "outside" ->
@@ -1012,7 +1024,7 @@ class MainActivity :
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_outside_title),
-              (server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_outside_sub)) + readyLine(),
+              server?.line?.takeIf { it.isNotBlank() } ?: "",
           )
       "nosearch" ->
           Banner(
@@ -1021,14 +1033,14 @@ class MainActivity :
               s(R.string.follo_standby_nosearch_title),
               (server?.line?.takeIf { it.isNotBlank() }
                   ?: ((server?.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
-                      s(R.string.follo_nosearch_tail))) + readyLine(),
+                      s(R.string.follo_nosearch_tail))),
           )
       else ->
           Banner(
               Kind.STANDBY,
               grey,
               s(R.string.follo_standby_title),
-              (server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub)) + readyLine(),
+              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub),
           )
     }
   }
@@ -1075,6 +1087,14 @@ class MainActivity :
     val powerVisibility = if (b.kind == Kind.NOT_SET_UP) View.GONE else View.VISIBLE
     if (binding.power.visibility != powerVisibility) binding.power.visibility = powerVisibility
     binding.power.off = b.kind == Kind.OFF
+    // "No search area loaded yet…" above the card: in the standing-by states, until the circles arrive
+    val noticeVisibility = if (b.kind == Kind.STANDBY && wakeAreas.isEmpty()) View.VISIBLE else View.GONE
+    if (binding.notice.visibility != noticeVisibility) binding.notice.visibility = noticeVisibility
+    // The circles' day on the bottom line ("9.11.2026"): what is left of "✓ Ready for MV (9-11-2026 update)"
+    val day = wakeUpdate?.takeIf { b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && wakeAreas.isNotEmpty() } ?: ""
+    if (binding.circlesDay.text.toString() != day) binding.circlesDay.text = day
+    val dayVisibility = if (day.isEmpty()) View.GONE else View.VISIBLE
+    if (binding.circlesDay.visibility != dayVisibility) binding.circlesDay.visibility = dayVisibility
 
     val tid = viewModel.trackerId
     binding.who.text =
@@ -1101,7 +1121,7 @@ class MainActivity :
               )
         }
     val queued = backlog()
-    if (queued > 0) parts += getString(R.string.follo_waiting, queued)
+    if (queued > 0 && !b.saysBacklog) parts += getString(R.string.follo_waiting, queued)
     viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }
     val text = parts.joinToString(" · ")
     if (binding.last.text.toString() != text) binding.last.text = text
@@ -1130,24 +1150,52 @@ class MainActivity :
   /** Base camp's drawings for this phone (12 Nov 2026): just above the search grids, under everything else. */
   private var drawOverlay: FolloDrawOverlay? = null
 
-  /** The card's third line: how far the offline map is. Only the waiting line takes a tap. */
+  /**
+   * The offline map's sign at the end of the card's second line (13 Nov 2026; a line of words until then): green once
+   * saved, red while saving or waiting for Wi-Fi, gone when there is nothing to save.
+   */
   private fun renderOffline(s: org.owntracks.android.data.repos.FolloOfflineRepo.State) {
     if (!::binding.isInitialized) return
-    val text =
-        when (s) {
-          is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving -> getString(R.string.follo_offline_saving, s.percent)
-          is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting -> getString(R.string.follo_offline_waiting)
-          org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved -> getString(R.string.follo_offline_saved)
-          org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden -> ""
-        }
-    if (binding.offline.text.toString() != text) binding.offline.text = text
-    binding.offline.visibility = if (text.isBlank() || !preferences.setupCompleted) View.GONE else View.VISIBLE
-    binding.offline.isClickable = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting
+    val hidden = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden || !preferences.setupCompleted
+    val visibility = if (hidden) View.GONE else View.VISIBLE
+    if (binding.offlineIcon.visibility != visibility) binding.offlineIcon.visibility = visibility
+    val saved = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved
+    binding.offlineIcon.imageTintList =
+        android.content.res.ColorStateList.valueOf(getColor(if (saved) R.color.follo_green else R.color.follo_red))
   }
 
-  /** A tap on "Offline map: waiting for Wi-Fi. Tap to use mobile data": one question, then the download. */
+  /** The words the sign stands for. */
+  private fun offlineWords(s: org.owntracks.android.data.repos.FolloOfflineRepo.State): String =
+      when (s) {
+        is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving -> getString(R.string.follo_offline_saving, s.percent)
+        is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting -> getString(R.string.follo_offline_waiting)
+        org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved -> getString(R.string.follo_offline_saved)
+        org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden -> ""
+      }
+
+  /** Did the finger go down on the offline map's sign (with 14 dp of room round it)? */
+  private fun onOfflineSign(): Boolean {
+    val icon = binding.offlineIcon
+    if (icon.visibility != View.VISIBLE || FolloPower.isOff) return false
+    val r = android.graphics.Rect()
+    icon.getDrawingRect(r)
+    binding.card.offsetDescendantRectToMyCoords(icon, r)
+    val room = (14 * resources.displayMetrics.density).toInt()
+    r.inset(-room, -room)
+    return r.contains(cardDownX.toInt(), cardDownY.toInt())
+  }
+
+  /**
+   * A tap on the offline map's sign: its words for a moment ("Offline map saved", "Saving offline map: 45%"); while
+   * it waits for Wi-Fi, the one question about mobile data, then the download.
+   */
   private fun onOfflineClicked() {
-    val s = folloOfflineRepo.state.value as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting ?: return
+    val state = folloOfflineRepo.state.value
+    val s = state as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting
+    if (s == null) {
+      offlineWords(state).takeIf { it.isNotEmpty() }?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+      return
+    }
     MaterialAlertDialogBuilder(this)
         .setTitle(R.string.follo_offline_ask_title)
         .setMessage(getString(R.string.follo_offline_ask_msg, s.megabytes))
@@ -1374,7 +1422,7 @@ class MainActivity :
         } else source.copyrightNotice.orEmpty()
     if (binding.credit.text.toString() != text) binding.credit.text = text
     val visibility = if (text.isBlank()) View.GONE else View.VISIBLE
-    if (binding.creditBar.visibility != visibility) binding.creditBar.visibility = visibility
+    if (binding.credit.visibility != visibility) binding.credit.visibility = visibility
   }
 
   private fun Location.toGeoPoint() = GeoPoint(latitude, longitude)
@@ -1523,7 +1571,8 @@ class MainActivity :
         android.graphics.RectF((binding.banner.right - map.left).toFloat(), 0f, map.width.toFloat(), map.height.toFloat())
     else {
       val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
-      val bottom = (binding.card.top - map.top).toFloat().takeIf { it > top } ?: map.height.toFloat()
+      // the top of the notice when it is shown, else of the card (both inside `bottom`, under its top padding)
+      val bottom = (binding.bottom.top + binding.bottom.paddingTop - map.top).toFloat().takeIf { it > top } ?: map.height.toFloat()
       android.graphics.RectF(0f, top, map.width.toFloat(), bottom)
     }
   }

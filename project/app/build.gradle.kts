@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.37" // 13 Nov 2026: drawings can be metres wide on the ground and go without the white casing (0.1.36: held map + "Recentre")
+val versionNameValue = "0.1.38" // 13 Nov 2026: compact screen (one-line banner, bottom line of pills) + the power button (0.1.37: metre-wide drawings)
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026

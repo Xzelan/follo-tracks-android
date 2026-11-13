@@ -69,6 +69,20 @@ class FolloRulesTest {
   }
 
   @Test
+  fun `the circles' day on the bottom line has dots`() {
+    assertEquals("9.11.2026", FolloRules.circlesDay(listOf("FOLLO MV wake 1 2026-11-09", "FOLLO MV wake 2 2026-11-01")))
+    assertNull(FolloRules.circlesDay(listOf("FOLLO MV wake 1")))
+  }
+
+  @Test
+  fun `the server's clock is shortened for the one-line banner`() {
+    assertEquals("5pm", FolloRules.shortClock("5:00 pm"))
+    assertEquals("5:30pm", FolloRules.shortClock("5:30 pm"))
+    assertEquals("10am", FolloRules.shortClock("10:00 am"))
+    assertEquals("", FolloRules.shortClock(null))
+  }
+
+  @Test
   fun `the Ready line's update date is the newest held date, shown without leading zeros`() {
     assertEquals("1-11-2026", FolloRules.readyUpdate(listOf("FOLLO MV wake 1 2026-11-01", "FOLLO MV wake 2 2026-11-01")))
     assertEquals("12-10-2026", FolloRules.readyUpdate(listOf("FOLLO MV wake 1 2026-10-12", "FOLLO MV wake 2 2026-10-03")))
