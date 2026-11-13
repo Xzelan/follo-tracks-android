@@ -1420,7 +1420,12 @@ class MainActivity :
           val c = map.mapCenter
           source.creditAt(c.latitude, c.longitude, org.osmdroid.util.TileSystem.getInputTileZoomLevel(map.zoomLevelDouble))
         } else source.copyrightNotice.orEmpty()
-    if (binding.credit.text.toString() != text) binding.credit.text = text
+    if (binding.credit.text.toString() != text) {
+      binding.credit.text = text
+      // The map reports its first scroll from inside a layout pass, where the pill's request for a new width is lost
+      // (seen on the Samsung, 13 Nov 2026: the Tasmanian credit cut short at the width of the Esri one): ask again after
+      binding.credit.post { binding.credit.requestLayout() }
+    }
     val visibility = if (text.isBlank()) View.GONE else View.VISIBLE
     if (binding.credit.visibility != visibility) binding.credit.visibility = visibility
   }
