@@ -13,7 +13,7 @@ import androidx.core.view.ViewCompat
 import org.owntracks.android.R
 
 /**
- * The round power button at the banner's top right (Alex, 13 Nov 2026). On: hold it for 3 seconds to turn the app Off
+ * The round power button at the banner's top right (Alex, 13 Nov 2026). On: hold it for 2 seconds to turn the app Off
  * (a ring fills while it is held; letting go early only shows a hint). Off: one tap turns it back on. The rules are
  * FolloRules.powerRelease / powerProgress; what Off means is FolloPower.
  */
@@ -41,7 +41,7 @@ class FolloPowerButton @JvmOverloads constructor(context: Context, attrs: Attrib
   private var down = false
   private var turnedOffByThisPress = false
   private var turnOffAction = View.NO_ID
-  // A plain delayed call decides, not an animation: "Remove animations" must not shorten the 3 seconds
+  // A plain delayed call decides, not an animation: "Remove animations" must not shorten the 2 seconds
   private val holdDone = Runnable {
     if (holding && !off) {
       stopHold()

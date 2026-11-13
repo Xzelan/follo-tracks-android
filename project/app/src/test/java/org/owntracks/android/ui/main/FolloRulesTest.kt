@@ -176,11 +176,11 @@ class FolloRulesTest {
 
   // Power button (13 Nov 2026)
   @Test
-  fun `the power button is held three seconds and its ring fills over them`() {
-    assertEquals(3_000L, FolloRules.POWER_HOLD_MS)
+  fun `the power button is held two seconds and its ring fills over them`() {
+    assertEquals(2_000L, FolloRules.POWER_HOLD_MS)
     assertEquals(0f, FolloRules.powerProgress(0), 0.0001f)
-    assertEquals(0.5f, FolloRules.powerProgress(1_500), 0.0001f)
-    assertEquals(1f, FolloRules.powerProgress(3_000), 0.0001f)
+    assertEquals(0.5f, FolloRules.powerProgress(1_000), 0.0001f)
+    assertEquals(1f, FolloRules.powerProgress(2_000), 0.0001f)
     assertEquals(1f, FolloRules.powerProgress(10_000), 0.0001f)
     assertEquals(0f, FolloRules.powerProgress(-5), 0.0001f)
   }

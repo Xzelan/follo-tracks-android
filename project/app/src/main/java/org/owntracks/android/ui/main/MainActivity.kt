@@ -260,7 +260,7 @@ class MainActivity :
     binding.offline.isClickable = false // only the waiting line takes a tap; otherwise the card does (recentre)
 
     binding.action.setOnClickListener { onActionClicked() }
-    // Power button (13 Nov 2026): hold 3 s = Off, one tap = on again
+    // Power button (13 Nov 2026): hold 2 s = Off, one tap = on again
     binding.power.onTurnOff = { setPower(off = true) }
     binding.power.onTurnOn = { setPower(off = false) }
     binding.power.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
@@ -484,7 +484,7 @@ class MainActivity :
 
   // ── Power button (Alex, 13 Nov 2026; support/FolloPower) ──────────────────────────────────────────
 
-  /** The button turned the app Off (held 3 s) or back on (one tap). */
+  /** The button turned the app Off (held 2 s) or back on (one tap). */
   private fun setPower(off: Boolean) {
     if (!preferences.setupCompleted || FolloPower.isOff == off) return
     FolloPower.set(this, off) // BackgroundService and showPower follow the flag

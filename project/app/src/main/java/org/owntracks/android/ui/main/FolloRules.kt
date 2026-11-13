@@ -43,8 +43,8 @@ object FolloRules {
 
   // ── Power button (Alex, 13 Nov 2026; what Off means: support/FolloPower) ─────────────────────────
 
-  /** How long the power button must be held to turn the app Off. */
-  const val POWER_HOLD_MS = 3_000L
+  /** How long the power button must be held to turn the app Off: 2 s (Alex, 13 Nov 2026; it began the day at 3 s). */
+  const val POWER_HOLD_MS = 2_000L
 
   /** The location-free hello that tells base camp a phone was turned Off; the server keeps 10 characters of it. */
   const val POWER_OFF_HELLO_SRC = "off"
