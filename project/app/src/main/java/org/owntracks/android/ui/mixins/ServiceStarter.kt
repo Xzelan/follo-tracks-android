@@ -18,6 +18,12 @@ interface ServiceStarter {
         Timber.d("not starting the service (no location permission yet), action $action")
         return
       }
+      // Power button (13 Nov 2026): Off = the tracking service is not started by anything (the screen, a circle
+      // crossing still on its way); the power button turns the app on first.
+      if (org.owntracks.android.support.FolloPower.isOff(context)) {
+        Timber.d("not starting the service (turned Off), action $action")
+        return
+      }
       Timber.d("requesting service start with action $action")
       ContextCompat.startForegroundService(
           context,

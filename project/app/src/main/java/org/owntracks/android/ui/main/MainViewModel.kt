@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
@@ -70,11 +70,17 @@ constructor(
   @OptIn(ExperimentalCoroutinesApi::class)
   val currentLocation: StateFlow<Location?> =
       locationUpdatesRequested
-          .flatMapLatest { if (it) locationCallbackFlow(application) else emptyFlow() }
+          // off again (power button, 13 Nov 2026) = the request is removed and the last fix forgotten
+          .flatMapLatest { if (it) locationCallbackFlow(application) else flowOf<Location?>(null) }
           .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
   fun requestLocationUpdates() {
     locationUpdatesRequested.value = true
+  }
+
+  /** Power button (13 Nov 2026): Off = the screen asks for no position either. */
+  fun stopLocationUpdates() {
+    locationUpdatesRequested.value = false
   }
 
   /** Fires every 15 s so "Last sent 3 min ago" stays honest while the screen is open. */

@@ -41,6 +41,38 @@ object FolloRules {
   fun holdsMap(dragged: Boolean, pinched: Boolean, turned: Boolean, doubleTap: Boolean): Boolean =
       dragged || pinched || turned || doubleTap
 
+  // ── Power button (Alex, 13 Nov 2026; what Off means: support/FolloPower) ─────────────────────────
+
+  /** How long the power button must be held to turn the app Off. */
+  const val POWER_HOLD_MS = 3_000L
+
+  /** The location-free hello that tells base camp a phone was turned Off; the server keeps 10 characters of it. */
+  const val POWER_OFF_HELLO_SRC = "off"
+
+  enum class PowerRelease {
+    /** the finger left the button, or this is the end of the hold that has just turned the app Off */
+    NOTHING,
+    /** the app is Off: one tap turns it back on, at once */
+    TURN_ON,
+    /** the app is on and the hold was too short: say how long it takes */
+    HINT,
+  }
+
+  /**
+   * What letting go of the power button does. [off] = the app's state when the finger lifts, [inside] = it lifted on
+   * the button, [turnedOffByThisPress] = this same press reached [POWER_HOLD_MS] and turned the app Off (its release
+   * must not turn it straight back on).
+   */
+  fun powerRelease(off: Boolean, inside: Boolean, turnedOffByThisPress: Boolean): PowerRelease =
+      when {
+        turnedOffByThisPress || !inside -> PowerRelease.NOTHING
+        off -> PowerRelease.TURN_ON
+        else -> PowerRelease.HINT
+      }
+
+  /** How far round the button's ring is after [heldMs] (0…1). */
+  fun powerProgress(heldMs: Long): Float = (heldMs.toFloat() / POWER_HOLD_MS).coerceIn(0f, 1f)
+
   /** Whether a leader's last fix (epoch seconds) is recent enough to show. */
   fun leaderFresh(lastFixS: Long, nowS: Long): Boolean = nowS - lastFixS <= LEADER_STALE_S
 

@@ -39,6 +39,15 @@
     <string name="follo_nosearch_tail">FOLLO doesn\'t keep check-ins outside search hours</string>
     <string name="follo_until">%1$s, until %2$s</string>
 
+    <!-- Power button (Alex, 13 Nov 2026): hold 3 s = Off (no location at all), one tap = on again; same words on iOS -->
+    <string name="follo_off_title">Off</string>
+    <string name="follo_off_sub">Not using GPS. FOLLO can still send you notifications</string>
+    <string name="follo_off_map">Tap the power button to turn on GPS</string>
+    <string name="follo_power_hold_hint">Hold for 3 seconds to turn off</string>
+    <string name="follo_power_cd_on">Power. Hold for 3 seconds to turn FOLLO Tracks off</string>
+    <string name="follo_power_cd_off">Power, off. Tap to turn FOLLO Tracks on</string>
+    <string name="follo_power_turn_off">Turn off</string>
+
     <string name="follo_action_title">Action needed</string>
     <string name="follo_perm_location_sub">FOLLO Tracks needs your location to record where you search</string>
     <string name="follo_perm_location_btn">Allow location</string>

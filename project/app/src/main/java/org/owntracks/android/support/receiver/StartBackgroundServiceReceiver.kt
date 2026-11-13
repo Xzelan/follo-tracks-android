@@ -48,6 +48,11 @@ class StartBackgroundServiceReceiver : BroadcastReceiver() {
         Timber.w("Not starting at ${intent.action}: no background location permission")
         return
       }
+      // Power button (13 Nov 2026): a phone turned Off stays off through a reboot or an app update
+      if (org.owntracks.android.support.FolloPower.isOff(context)) {
+        Timber.i("Not starting at ${intent.action}: turned Off")
+        return
+      }
       Timber.v("android.intent.action.BOOT_COMPLETED received")
       folloDiagRepo.noteLaunch(if (Intent.ACTION_BOOT_COMPLETED == intent.action) "boot" else "update")
       val startIntent = Intent(context, BackgroundService::class.java)

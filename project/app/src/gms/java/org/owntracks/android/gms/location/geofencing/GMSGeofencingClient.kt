@@ -9,6 +9,7 @@ import com.google.android.gms.location.LocationServices
 import org.owntracks.android.location.geofencing.GeofencingClient
 import org.owntracks.android.location.geofencing.GeofencingRequest
 import org.owntracks.android.services.BackgroundService
+import org.owntracks.android.support.FolloPower
 import timber.log.Timber
 
 class GMSGeofencingClient(
@@ -23,6 +24,11 @@ class GMSGeofencingClient(
 
   @RequiresPermission(anyOf = ["android.permission.ACCESS_FINE_LOCATION"])
   override fun addGeofences(request: GeofencingRequest, context: Context) {
+    // Power button (13 Nov 2026): Off = no circle is handed to Play services, whoever calls (FolloPower)
+    if (FolloPower.isOff) {
+      Timber.i("Off: geofences refused")
+      return
+    }
     val gmsRequest = request.toGMSGeofencingRequest()
     Timber.d("Adding ${gmsRequest.geofences?.size ?: 0} geofences via GMS")
     this.geofencingClient

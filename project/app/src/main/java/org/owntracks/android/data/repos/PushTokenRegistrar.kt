@@ -33,6 +33,12 @@ constructor(
 ) {
   fun onToken(token: String?) {
     if (!pushTokenRepo.update(token)) return
+    if (org.owntracks.android.support.FolloPower.isOff(context)) {
+      // Power button (13 Nov 2026): Off = no position is posted for a token; a rotated one goes with a location-free
+      // hello (FolloPushService.onNewToken), a first one on the next post
+      Timber.d("push token: turned Off, no position posted for it")
+      return
+    }
     if (!preferences.setupCompleted || !hasLocationPermission(context)) {
       Timber.d("push token: not set up / no location permission, sent on the next post")
       return

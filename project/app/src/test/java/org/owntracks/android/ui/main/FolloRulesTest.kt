@@ -174,6 +174,35 @@ class FolloRulesTest {
     assertFalse(FolloRules.holdsMap(dragged = false, pinched = false, turned = false, doubleTap = false))
   }
 
+  // Power button (13 Nov 2026)
+  @Test
+  fun `the power button is held three seconds and its ring fills over them`() {
+    assertEquals(3_000L, FolloRules.POWER_HOLD_MS)
+    assertEquals(0f, FolloRules.powerProgress(0), 0.0001f)
+    assertEquals(0.5f, FolloRules.powerProgress(1_500), 0.0001f)
+    assertEquals(1f, FolloRules.powerProgress(3_000), 0.0001f)
+    assertEquals(1f, FolloRules.powerProgress(10_000), 0.0001f)
+    assertEquals(0f, FolloRules.powerProgress(-5), 0.0001f)
+  }
+
+  @Test
+  fun `one tap turns an Off app back on and a short press on a running app only shows the hint`() {
+    assertEquals(FolloRules.PowerRelease.TURN_ON, FolloRules.powerRelease(off = true, inside = true, turnedOffByThisPress = false))
+    assertEquals(FolloRules.PowerRelease.HINT, FolloRules.powerRelease(off = false, inside = true, turnedOffByThisPress = false))
+  }
+
+  @Test
+  fun `letting go after the hold does not turn the app straight back on, nor does sliding off the button`() {
+    assertEquals(FolloRules.PowerRelease.NOTHING, FolloRules.powerRelease(off = true, inside = true, turnedOffByThisPress = true))
+    assertEquals(FolloRules.PowerRelease.NOTHING, FolloRules.powerRelease(off = true, inside = false, turnedOffByThisPress = false))
+    assertEquals(FolloRules.PowerRelease.NOTHING, FolloRules.powerRelease(off = false, inside = false, turnedOffByThisPress = false))
+  }
+
+  @Test
+  fun `the Off hello's source fits what the server keeps`() {
+    assertTrue(FolloRules.POWER_OFF_HELLO_SRC.length <= 10)
+  }
+
   // Search windows (1 Nov 2026)
   private val mv = FolloRules.Circle(-41.1, 146.8, 300.0, "MV")
   private val cb = FolloRules.Circle(-40.8, 145.1, 300.0, "CB")

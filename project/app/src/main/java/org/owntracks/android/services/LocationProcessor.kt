@@ -27,6 +27,7 @@ import org.owntracks.android.location.geofencing.Geofence
 import org.owntracks.android.model.messages.AddMessageStatus
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageHello
+import org.owntracks.android.support.FolloPower
 import org.owntracks.android.model.messages.MessageLocation.Companion.fromLocation
 import org.owntracks.android.model.messages.MessageStatus
 import org.owntracks.android.model.messages.MessageTransition
@@ -317,10 +318,33 @@ constructor(
   }
 
   /**
+   * Power button (Alex, 13 Nov 2026): the app was turned Off. Every fix held on the phone is dropped, a check-in under
+   * way is forgotten, and (when [announce]) base camp is told once, without a position: an ordinary hello, src "off".
+   */
+  fun onPowerOff(announce: Boolean) {
+    dropHeld()
+    pendingHello = null
+    if (announce && preferences.setupCompleted) queueOffHello(FolloRules.POWER_OFF_HELLO_SRC)
+  }
+
+  /** The location-free hello of a phone that is Off (fd.off 1): "off" when it is turned off, "push" to base camp's ask. */
+  fun queueOffHello(src: String) {
+    messageProcessor.queueMessageForSending(
+        MessageHello(
+            src = src,
+            m = preferences.monitoring.value,
+            tid = preferences.tid.toString(),
+            fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+        ),
+    )
+  }
+
+  /**
    * An automatic check-in's fix (accuracy already under 100 m). Returns true when something was
    * sent (the position or a hello), false when nothing left the phone.
    */
   suspend fun onCheckInLocation(location: Location, src: CheckInSource, secondStep: Boolean = false): Boolean {
+    if (FolloPower.isOff) return false
     val inside = insideHeldSearch(location)
     return when (FolloRules.checkInAction(inside, secondStep)) {
       FolloRules.CheckInAction.POST_FIX -> {
@@ -352,6 +376,10 @@ constructor(
    * the hello's fix again if it is still under a minute old, else ask the service for a fresh one.
    */
   fun onHelloAnswered() {
+    if (FolloPower.isOff) {
+      pendingHello = null
+      return
+    }
     val pending = pendingHello ?: return
     pendingHello = null
     scope.launch {
@@ -370,6 +398,8 @@ constructor(
       checkIn: Boolean = false,
   ): Result<Unit> {
     Timber.v("Maybe publishing $location with trigger $trigger")
+    // Power button (13 Nov 2026): Off = no position leaves the phone, whatever asked for it
+    if (FolloPower.isOff) return Result.failure(Exception("turned off"))
     if (!checkIn && !locationIsWithAccuracyThreshold(location))
         return Result.failure(Exception("location accuracy too low"))
 
@@ -573,6 +603,7 @@ constructor(
    */
   suspend fun onLocationChanged(location: Location, reportType: MessageLocation.ReportType) {
     Timber.v("OnLocationChanged $location $reportType")
+    if (FolloPower.isOff) return // a fix that was already on its way when the app was turned Off: forgotten
     if (
         location.time > locationRepo.currentLocationTime ||
             reportType != MessageLocation.ReportType.DEFAULT
@@ -599,6 +630,7 @@ constructor(
       transition: Int,
       trigger: String,
   ) {
+    if (FolloPower.isOff) return
     if (!locationIsWithAccuracyThreshold(location)) {
       Timber.d(
           "ignoring transition for $location, transition=$transition, trigger=$trigger: low accuracy"

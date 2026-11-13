@@ -37,4 +37,6 @@ data class FolloDiag(
     @SerialName("gv") val gv: String? = null,
     /** Offline map: percent of its tiles saved, 0–100; absent when there is nothing to save. */
     @SerialName("of") val of: Int? = null,
+    /** 1 while the app is turned Off with the power button (13 Nov 2026); absent otherwise. */
+    @SerialName("off") val off: Int? = null,
 )

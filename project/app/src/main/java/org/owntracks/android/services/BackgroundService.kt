@@ -79,6 +79,7 @@ import org.owntracks.android.model.messages.MessageWakeAck
 import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
 import org.owntracks.android.preferences.types.MonitoringMode
+import org.owntracks.android.support.FolloPower
 import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.preferences.types.MonitoringMode.Companion.getByValue
 import org.owntracks.android.services.worker.Scheduler
@@ -241,6 +242,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           }
         }
         launch { setupGeofences() }
+        // Power button (13 Nov 2026): Off stops every location request here, on again starts them as at a launch
+        launch { FolloPower.offState.collect { onPower(it) } }
         // "No fix on open" (1 Nov 2026): the second judgement after a hello needs a fresh fix
         launch { locationProcessor.secondStepFixRequests.collect { folloCheckIn(it, secondStep = true) } }
         // Near-circle watch (2 Nov 2026): a window opening, circles arriving or the phone standing by turn it on
@@ -289,6 +292,16 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Timber.v("Backgroundservice onStartCommand intent=$intent")
     super.onStartCommand(intent, flags, startId)
+    if (FolloPower.isOff(this)) {
+      // Power button (13 Nov 2026): Off. Nothing here may run. Whoever started it with startForegroundService was
+      // promised a foreground start, so the promise is kept for an instant and the service goes again.
+      Timber.i("Off: start refused (${intent?.action})")
+      startForegroundService()
+      stopForeground(STOP_FOREGROUND_REMOVE)
+      folloDiagRepo.foregroundServiceRunning = false
+      stopSelf()
+      return START_NOT_STICKY
+    }
     handleIntent(intent)
     if (!serviceSetUp) setupAndStartService()
     startForegroundService()
@@ -528,6 +541,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   private fun setupAndStartService() {
     Timber.v("setupAndStartService")
+    if (FolloPower.isOff) return
     serviceSetUp = true
     startForegroundService()
     setupLocationRequest()
@@ -671,7 +685,48 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     synchronized(activeNotifications) { activeNotifications.clear() }
   }
 
+  // ── Power button (Alex, 13 Nov 2026; support/FolloPower) ────────────────────────────────────────
+  /** The power state this service last acted on (null = none yet). */
+  private var powerOff: Boolean? = null
+
+  private suspend fun onPower(off: Boolean) {
+    val was = powerOff
+    powerOff = off
+    when {
+      // announce only a real switch; a service created while the app is already Off just makes sure nothing is left
+      off -> shutLocationOff(announce = was == false)
+      was == true -> {
+        Timber.i("FOLLO power: back on, starting as at a launch")
+        setupAndStartService()
+        setupGeofences()
+      }
+    }
+  }
+
+  /**
+   * Off: the phone stands by (so it starts standing by when it is turned back on), every location request is removed,
+   * the wake-up circles are taken off Play services, base camp is told once with a location-free hello, and the
+   * foreground service with its notification goes. The activity may still be bound; the process then only sends what
+   * is queued.
+   */
+  private fun shutLocationOff(announce: Boolean) {
+    Timber.i("FOLLO power: off, removing every location request and the circles")
+    if (preferences.monitoring != MonitoringMode.Manual) preferences.monitoring = MonitoringMode.Manual
+    locationProviderClient.removeLocationUpdates(callbackForReportType[MessageLocation.ReportType.DEFAULT]!!.value)
+    folloCheckInCallback?.let { stopFolloCheckIn(it) }
+    setNearWatch(FolloRules.WatchStage.OFF)
+    significantMotionSensor.cancel()
+    scheduler.cancelAllTasks()
+    geofencingClient.removeGeofences(this)
+    locationProcessor.onPowerOff(announce)
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    notificationManagerCompat.cancel(NOTIFICATION_ID_ONGOING)
+    folloDiagRepo.foregroundServiceRunning = false
+    stopSelf()
+  }
+
   private suspend fun onGeofencingEvent(event: GeofencingEvent) {
+    if (FolloPower.isOff) return
     if (event.hasError()) {
       Timber.e("geofencingEvent hasError: ${event.errorCode}")
       return
@@ -726,6 +781,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
    */
   private fun folloCheckIn(src: LocationProcessor.CheckInSource, secondStep: Boolean = false) {
     val notify = src != LocationProcessor.CheckInSource.OPEN && !secondStep
+    if (FolloPower.isOff) {
+      // Off: no fix is taken; base camp's ask is passed to the person instead
+      if (notify) FolloCheckInNotification.show(this, null)
+      return
+    }
     if (!requirementsChecker.hasLocationPermissions()) {
       if (notify) FolloCheckInNotification.show(this, null)
       return
@@ -808,7 +868,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     nearWatchCallback = null
     nearWatchStage = stage
     Timber.i("near-circle watch: $stage")
-    if (stage == FolloRules.WatchStage.OFF || !requirementsChecker.hasLocationPermissions()) return
+    if (stage == FolloRules.WatchStage.OFF || FolloPower.isOff || !requirementsChecker.hasLocationPermissions()) return
     val near = stage == FolloRules.WatchStage.NEAR
     val every = Duration.ofSeconds(if (near) FolloRules.NEAR_WATCH_EVERY_S else FolloRules.FAR_WATCH_EVERY_S)
     val callback =
@@ -836,14 +896,14 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   /** Whether the watch should run at all: standing by, holding circles that count now (an open search window). */
   private suspend fun evaluateNearWatch() {
-    val wanted = preferences.monitoring == MonitoringMode.Manual && locationProcessor.watchCirclesCountNow()
+    val wanted = !FolloPower.isOff && preferences.monitoring == MonitoringMode.Manual && locationProcessor.watchCirclesCountNow()
     if (!wanted) setNearWatch(FolloRules.WatchStage.OFF)
     else if (nearWatchStage == FolloRules.WatchStage.OFF) setNearWatch(FolloRules.WatchStage.FAR)
   }
 
   /** A watch fix: judged on the phone only. Inside (and good) => posted as a circle crossing; otherwise forgotten. */
   private suspend fun onNearWatchFix(l: Location) {
-    if (preferences.monitoring != MonitoringMode.Manual) {
+    if (FolloPower.isOff || preferences.monitoring != MonitoringMode.Manual) {
       setNearWatch(FolloRules.WatchStage.OFF)
       return
     }
@@ -856,7 +916,9 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   }
 
   fun requestOnDemandLocationUpdate(reportType: MessageLocation.ReportType) {
-    if (requirementsChecker.hasLocationPermissions()) {
+    if (FolloPower.isOff) {
+      Timber.i("Off: no on-demand location ($reportType)")
+    } else if (requirementsChecker.hasLocationPermissions()) {
       Timber.d("On demand location request")
       locationProviderClient.singleHighAccuracyLocation(
           callbackForReportType[reportType]!!.value,
@@ -869,6 +931,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   private fun setupLocationRequest(): Result<Unit> {
     Timber.v("setupLocationRequest")
+    if (FolloPower.isOff) {
+      // Power button (13 Nov 2026): Off = no location updates, whatever mode a server reply sets meanwhile
+      locationProviderClient.removeLocationUpdates(callbackForReportType[MessageLocation.ReportType.DEFAULT]!!.value)
+      return Result.success(Unit)
+    }
     if (requirementsChecker.hasLocationPermissions()) {
       val monitoring = preferences.monitoring
       // FOLLO: standing by, the phone asks for no positions at all (as on iOS); only the wake
@@ -943,6 +1010,12 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   }
 
   private suspend fun setupGeofences() {
+    if (FolloPower.isOff) {
+      // Power button (13 Nov 2026): Off = no circle is handed to Play services (a geofence is location use). The
+      // circles stay stored and are registered when the app is turned back on.
+      geofencingClient.removeGeofences(this@BackgroundService)
+      return
+    }
     if (requirementsChecker.hasLocationPermissions()) {
 
       withContext(ioDispatcher) {
@@ -1039,6 +1112,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   fun reInitializeLocationRequests() {
     Timber.v("Reinitializing location requests")
+    if (FolloPower.isOff) return
     // FOLLO: a permission granted after the service started means the geofences were never
     // registered
     lifecycleScope.launch { setupGeofences() }

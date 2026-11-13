@@ -79,6 +79,7 @@ constructor(
         v = appVersion(),
         gv = folloGridRepo.heldVersion(),
         of = folloOfflineRepo.percent,
+        off = if (org.owntracks.android.support.FolloPower.isOff) 1 else null,
     )
   }
 

@@ -79,6 +79,12 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
           .build()
 
   private fun updateNotification() {
+    // Power button (13 Nov 2026): Off = there is no tracking service, so no "standing by" notification either. (The
+    // service object can still exist, bound by the open screen; its state changes must not bring the notification back.)
+    if (org.owntracks.android.support.FolloPower.isOff) {
+      notificationManagerCompat.cancel(NOTIFICATION_ID_ONGOING)
+      return
+    }
     if (
         ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED

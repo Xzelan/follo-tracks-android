@@ -14,6 +14,9 @@ import org.owntracks.android.data.repos.PushTokenRegistrar
 import org.owntracks.android.di.ApplicationScope
 import org.owntracks.android.model.messages.MessageWakeAck
 import org.owntracks.android.preferences.Preferences
+import org.owntracks.android.support.FolloPower
+import org.owntracks.android.model.messages.MessageHello
+import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.ui.mixins.hasLocationPermission
 import timber.log.Timber
 
@@ -48,6 +51,28 @@ class FolloPushService : FirebaseMessagingService() {
 
   override fun onNewToken(token: String) {
     pushTokenRegistrar.onToken(token)
+    // Power button (13 Nov 2026): Off, the registrar posts no position; the new token still has to reach the server
+    // for the phone to go on getting FOLLO's notifications, so it rides on a location-free hello
+    if (FolloPower.isOff(this) && preferences.setupCompleted) offHello(LocationProcessor.CheckInSource.TOKEN.wire)
+  }
+
+  /** The location-free hello of a phone that is Off (fd.off 1), sent from here because the tracking service is not running. */
+  private fun offHello(src: String) {
+    messageProcessor.queueMessageForSending(
+        MessageHello(
+            src = src,
+            m = preferences.monitoring.value,
+            tid = preferences.tid.toString(),
+            fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+        ),
+    )
+    scope.launch {
+      try {
+        messageProcessor.initializeAndReconnect().exceptionOrNull()?.let { Timber.w(it, "off hello: reconnect failed, it waits for the next post") }
+      } catch (e: Exception) {
+        Timber.w(e, "off hello: could not arm the sender, it waits for the next post")
+      }
+    }
   }
 
   override fun onMessageReceived(message: RemoteMessage) {
@@ -61,6 +86,14 @@ class FolloPushService : FirebaseMessagingService() {
 
   private fun checkIn(data: Map<String, String>) {
     Timber.i("push: base camp asks for a check-in (area ${data["area"]}, by ${data["by"]})")
+    if (FolloPower.isOff(this)) {
+      // Power button (13 Nov 2026): Off = no fix is taken. The person is asked to open the app, and base camp gets a
+      // location-free hello so the ask shows as answered.
+      Timber.i("push check-in: turned Off, asking the person and answering without a position")
+      if (preferences.setupCompleted) offHello(LocationProcessor.CheckInSource.PUSH.wire)
+      FolloCheckInNotification.show(this, data["title"])
+      return
+    }
     if (hasLocationPermission(this)) {
       try {
         ContextCompat.startForegroundService(
@@ -88,7 +121,8 @@ class FolloPushService : FirebaseMessagingService() {
     }
     Timber.i("push: base camp changed the $area circles (v $v, by ${data["by"]}), acknowledging without a position")
     val pv = folloStatusRepo.heldPolyVersion()
-    if (!folloDiagRepo.foregroundServiceRunning && hasLocationPermission(this)) {
+    // Off (power button, 13 Nov 2026): the tracking service is not started; the ack goes from here
+    if (!FolloPower.isOff(this) && !folloDiagRepo.foregroundServiceRunning && hasLocationPermission(this)) {
       try {
         ContextCompat.startForegroundService(
             this,

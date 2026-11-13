@@ -17,6 +17,7 @@ import org.owntracks.android.location.LocationCallback
 import org.owntracks.android.location.LocationProviderClient
 import org.owntracks.android.location.LocationRequest
 import org.owntracks.android.location.LocationResult
+import org.owntracks.android.support.FolloPower
 import timber.log.Timber
 
 /**
@@ -38,6 +39,11 @@ class GMSLocationProviderClient(
           ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]
   )
   override fun singleHighAccuracyLocation(clientCallBack: LocationCallback, looper: Looper) {
+    // Power button (13 Nov 2026): Off = Play services is asked for nothing here, whoever calls (FolloPower)
+    if (FolloPower.isOff) {
+      Timber.i("Off: single location request refused")
+      return
+    }
     fusedLocationProviderClient
         .getCurrentLocation(
             CurrentLocationRequest.Builder()
@@ -79,6 +85,10 @@ class GMSLocationProviderClient(
       clientCallBack: LocationCallback,
       looper: Looper,
   ) {
+    if (FolloPower.isOff) {
+      Timber.i("Off: location updates refused (clientCallback=${clientCallBack.hashCode()})")
+      return
+    }
     Timber.d(
         "Requesting location updates priority=${locationRequest.priority}, " +
             "interval=${locationRequest.interval} clientCallback=${clientCallBack.hashCode()}"
@@ -114,6 +124,7 @@ class GMSLocationProviderClient(
           ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]
   )
   override fun getLastLocation(): Location? {
+    if (FolloPower.isOff) return null // not even the last known position
     return try {
       Tasks.await(fusedLocationProviderClient.lastLocation)
     } catch (e: ExecutionException) {

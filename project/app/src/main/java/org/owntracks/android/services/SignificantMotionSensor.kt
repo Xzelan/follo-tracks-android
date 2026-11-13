@@ -138,7 +138,9 @@ class SignificantMotionSensor(
       return
     }
 
-    if (requirementsChecker.hasLocationPermissions()) {
+    if (org.owntracks.android.support.FolloPower.isOff) {
+      Timber.d("Off: no location for significant motion")
+    } else if (requirementsChecker.hasLocationPermissions()) {
       Timber.d("Requesting high-accuracy location due to significant motion detection")
       lastSignificantMotionLocationRequestTime = now
       locationProviderClient.singleHighAccuracyLocation(locationCallback, looper)

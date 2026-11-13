@@ -69,6 +69,7 @@ import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.services.BackgroundService
 import org.owntracks.android.services.LocationProcessor
 import org.owntracks.android.support.ContactImageBindingAdapter
+import org.owntracks.android.support.FolloPower
 import org.owntracks.android.support.RequirementsChecker
 import org.owntracks.android.ui.NotificationsStash
 import org.owntracks.android.ui.mixins.BackgroundLocationPermissionRequester
@@ -142,6 +143,8 @@ class MainActivity :
     SHARING,
     STANDBY,
     SETTING_UP,
+    /** Turned Off with the power button (13 Nov 2026): no location use at all; red, no button but the power one. */
+    OFF,
   }
 
   private val serviceConnection =
@@ -201,6 +204,10 @@ class MainActivity :
   }
 
   private fun onLocationPermissionGranted() {
+    if (FolloPower.isOff) {
+      render()
+      return
+    }
     if (requirementsChecker.hasLocationPermissions()) {
       viewModel.requestLocationUpdates()
       myLocationOverlay?.enableMyLocation()
@@ -253,11 +260,15 @@ class MainActivity :
     binding.offline.isClickable = false // only the waiting line takes a tap; otherwise the card does (recentre)
 
     binding.action.setOnClickListener { onActionClicked() }
+    // Power button (13 Nov 2026): hold 3 s = Off, one tap = on again
+    binding.power.onTurnOff = { setPower(off = true) }
+    binding.power.onTurnOn = { setPower(off = false) }
+    binding.power.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
     binding.card.setOnClickListener { recentre() }
     binding.banner.setOnClickListener { recentre() } // top or bottom, either one brings the arrow back (Alex 24 Oct 2026)
     // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
     binding.card.setOnLongClickListener {
-      if (requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
+      if (!FolloPower.isOff && requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
         Toast.makeText(this, R.string.follo_send_now, Toast.LENGTH_SHORT).show()
         pendingCheckIn = PendingCheckIn.USER
         checkInIfReady()
@@ -324,6 +335,7 @@ class MainActivity :
               }
         }
         launch { viewModel.lastSentAt.collect { render() } }
+        launch { FolloPower.offState.collect { showPower(it) } }
         launch { viewModel.rejected.collect { render() } }
         launch {
           viewModel.folloStatus.collect {
@@ -342,6 +354,7 @@ class MainActivity :
         // The phone decides green/grey at the area edge itself, so every new fix may change it.
         launch {
           viewModel.currentLocation.collect {
+            if (FolloPower.isOff) return@collect // a fix already on its way when the app was turned Off: forgotten
             it?.let(viewModel::addTrack)
             it?.let { l -> folloOfflineRepo.notePosition(l.latitude, l.longitude) }
             it?.let(compass::updateDeclination)
@@ -412,6 +425,8 @@ class MainActivity :
       width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_card) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
       gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
     }
+    // the Off words sit in the part of the screen the map shows in: right of the side panel when the phone is sideways
+    binding.offCover.updatePadding(left = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0)
     binding.title.textSize = if (land) 22f else 26f
   }
 
@@ -441,8 +456,15 @@ class MainActivity :
     // A system prompt pauses us, so being resumed means it has gone; our own dialogs do not pause us.
     promptInFlight = ownDialog?.isShowing == true
     map.onResume()
-    compass.start()
     shakeTurner.start()
+    // Power button (13 Nov 2026): Off = the screen comes forward without asking for a position or checking in
+    if (!FolloPower.isOff(this)) comeForward()
+    render()
+  }
+
+  /** What coming to the front starts: the screen's own fixes, the permission questions, the fetches and the check-in. */
+  private fun comeForward() {
+    compass.start()
     if (requirementsChecker.hasLocationPermissions()) {
       viewModel.requestLocationUpdates()
       myLocationOverlay?.enableMyLocation()
@@ -458,6 +480,45 @@ class MainActivity :
       pendingCheckIn = PendingCheckIn.OPEN
       checkInIfReady()
     }
+  }
+
+  // ── Power button (Alex, 13 Nov 2026; support/FolloPower) ──────────────────────────────────────────
+
+  /** The button turned the app Off (held 3 s) or back on (one tap). */
+  private fun setPower(off: Boolean) {
+    if (!preferences.setupCompleted || FolloPower.isOff == off) return
+    FolloPower.set(this, off) // BackgroundService and showPower follow the flag
+    if (!off) {
+      startService(this) // the tracking service again, as when the app is opened
+      lastOpenCheckInAt = -OPEN_CHECK_IN_DEDUPE_MS
+      if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) comeForward()
+    }
+    showPower(off)
+  }
+
+  /** What the screen last showed for the power state (null = nothing yet). */
+  private var shownOff: Boolean? = null
+
+  /** Off: no map and no location for the screen, only the words; on: the map back. */
+  private fun showPower(off: Boolean) {
+    if (!::map.isInitialized || shownOff == off) return
+    shownOff = off
+    binding.offCover.visibility = if (off) View.VISIBLE else View.GONE
+    map.visibility = if (off) View.INVISIBLE else View.VISIBLE
+    if (off) {
+      viewModel.stopLocationUpdates()
+      myLocationOverlay?.disableMyLocation()
+      compass.stop()
+      camAnim?.cancel()
+      pendingCheckIn = null
+      viewModel.saveTrack()
+      binding.creditBar.visibility = View.GONE
+    } else {
+      followPaused = false
+      centredOnce = false
+      camRef = null
+      showCredit()
+    }
     render()
   }
 
@@ -471,6 +532,7 @@ class MainActivity :
   private var pendingCheckIn: PendingCheckIn? = null
 
   private fun checkInIfReady() {
+    if (FolloPower.isOff) return
     val kind = pendingCheckIn ?: return
     val l = viewModel.currentLocation.value ?: return
     if (l.accuracy >= CHECK_IN_MAX_ACC_M || System.currentTimeMillis() - l.time > CHECK_IN_MAX_AGE_MS) return
@@ -487,6 +549,7 @@ class MainActivity :
    * wake-up circle or boundary, a location-free hello otherwise (BackgroundService.folloCheckIn, src "open").
    */
   private fun openCheckIn() {
+    if (FolloPower.isOff) return
     // Coming to the front and the permission chain's "granted" callback both land here within a second of each
     // other (Samsung test 1 Nov 2026: two hellos per open); one automatic check-in per 10 s is plenty.
     val now = SystemClock.elapsedRealtime()
@@ -688,6 +751,7 @@ class MainActivity :
 
   /** Asks, in order and one at a time, for what tracking needs; the banner shows what is left. */
   private fun runPermissionChain() {
+    if (FolloPower.isOff) return // Off asks for nothing; the questions come back when the app is turned on
     if (promptInFlight) return // one Android prompt at a time; a second launch cancels the first
     if (!requirementsChecker.hasLocationPermissions()) {
       if (!preferences.userDeclinedEnableLocationPermissions) requestLocation()
@@ -875,6 +939,8 @@ class MainActivity :
     fun s(id: Int) = getString(id)
     if (!viewModel.setupCompleted.value)
         return Banner(Kind.NOT_SET_UP, grey, s(R.string.follo_not_setup_title), s(R.string.follo_not_setup_sub))
+    // Power button (13 Nov 2026): red, like a setting that needs attention, because nothing is recorded
+    if (FolloPower.isOff) return Banner(Kind.OFF, red, s(R.string.follo_off_title), s(R.string.follo_off_sub))
     if (promptInFlight)
         return Banner(Kind.SETTING_UP, grey, s(R.string.follo_setting_up_title), s(R.string.follo_setting_up_sub))
     if (!requirementsChecker.hasLocationPermissions())
@@ -1005,6 +1071,10 @@ class MainActivity :
     binding.action.visibility = if (b.button == null) View.GONE else View.VISIBLE
     binding.action.text = b.button ?: ""
     binding.action.setTextColor(b.color)
+    // Power button (13 Nov 2026): there once the phone is set up
+    val powerVisibility = if (b.kind == Kind.NOT_SET_UP) View.GONE else View.VISIBLE
+    if (binding.power.visibility != powerVisibility) binding.power.visibility = powerVisibility
+    binding.power.off = b.kind == Kind.OFF
 
     val tid = viewModel.trackerId
     binding.who.text =
@@ -1039,7 +1109,7 @@ class MainActivity :
     // David S, Marie — fd.lp 1 ⇒ thin, gappy tracks even with the app exempt from battery optimisation). It is the phone's
     // own setting, so the note says what to do and a tap opens the Battery saver page; it comes first, over the
     // notifications note.
-    batterySaverNote = b.kind != Kind.NOT_SET_UP && isPowerSaveMode()
+    batterySaverNote = b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && isPowerSaveMode()
     val note =
         when {
           batterySaverNote -> getString(R.string.follo_battery_saver_note)
@@ -1240,7 +1310,7 @@ class MainActivity :
     // Until the first fix: the phone's own fix if there is one, else the last position Android already holds (read from
     // its cache, no new fix taken, never sent: only the map uses it) at walking scale, else the Australia overview
     // (9 Nov 2026, Greg G: the app opened on a George Town street, grey where the imagery stops, before his first fix)
-    val known = viewModel.currentLocation.value ?: lastKnownForMap()
+    val known = viewModel.currentLocation.value ?: if (FolloPower.isOff(this)) null else lastKnownForMap()
     known?.let { folloOfflineRepo.notePosition(it.latitude, it.longitude) } // which areas are near enough to save (phone only)
     if (known != null) {
       map.controller.setZoom(START_ZOOM) // walking scale
@@ -1295,6 +1365,7 @@ class MainActivity :
    * zoom; the text is only touched when it changes.
    */
   private fun showCredit() {
+    if (FolloPower.isOff) return // no map, no credit
     val source = map.tileProvider.tileSource
     val text =
         if (source is FolloTileSource) {
@@ -1698,6 +1769,7 @@ class MainActivity :
 
   /** Card or banner tap: follow again, heading-up, at walking scale, with the arrow back on its spot. */
   private fun recentre() {
+    if (FolloPower.isOff) return // no map to recentre
     followPaused = false
     if (camera == Camera.NAV) requestNavFrame() // the compass turns the map back even before the next fix
     val l = viewModel.currentLocation.value ?: return
