@@ -13,12 +13,12 @@ import androidx.core.view.ViewCompat
 import org.owntracks.android.R
 
 /**
- * The round power button at the banner's top right (Alex, 13 Nov 2026). On: hold it for 2 seconds to turn the app Off
+ * The round power button, at the card's right since 14 Nov 2026 (13 Nov: the banner's top right; Alex). On: hold it for 2 seconds to turn the app Off
  * (a ring fills while it is held; letting go early only shows a hint). Off: one tap turns it back on. The rules are
  * FolloRules.powerRelease / powerProgress; what Off means is FolloPower.
  */
 class FolloPowerButton @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
-  /** True = the app is Off (white disc, red symbol, a tap turns it on). */
+  /** True = the app is Off (red disc, white symbol, a tap turns it on). */
   var off = false
     set(value) {
       if (field == value) return
@@ -36,6 +36,7 @@ class FolloPowerButton @JvmOverloads constructor(context: Context, attrs: Attrib
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val arc = RectF()
   private val red = context.getColor(R.color.follo_red)
+  private val symbol = context.getColor(R.color.follo_subtext)
   private var holdStart = 0L
   private var holding = false
   private var down = false
@@ -134,17 +135,17 @@ class FolloPowerButton @JvmOverloads constructor(context: Context, attrs: Attrib
     val side = minOf(width, height).toFloat()
     val cx = width / 2f
     val cy = height / 2f
-    val radius = side / 2f - 2 * density
-    // On: a faint disc with a white symbol, quiet on any banner colour. Off: a white disc with the red symbol, the one
-    // thing on the screen to tap.
+    val radius = side / 2f - 0.5f * density
+    // On the card (14 Nov 2026, wording page): on = a pale grey disc with a dark grey symbol; Off = a red disc with a
+    // white symbol, the one thing on the screen to tap.
     paint.style = Paint.Style.FILL
-    paint.color = if (off) 0xFFFFFFFF.toInt() else if (down) 0x52FFFFFF else 0x2EFFFFFF
+    paint.color = if (off) red else if (down) 0xFFD2D7CF.toInt() else 0xFFE2E6DF.toInt()
     canvas.drawCircle(cx, cy, radius, paint)
 
     paint.style = Paint.Style.STROKE
     paint.strokeCap = Paint.Cap.ROUND
     paint.strokeWidth = 2.4f * density
-    paint.color = if (off) red else 0xFFFFFFFF.toInt()
+    paint.color = if (off) 0xFFFFFFFF.toInt() else symbol
     val r = side * 0.21f
     arc.set(cx - r, cy - r, cx + r, cy + r)
     val gap = 50f // degrees of opening at the top, either side of the stem
@@ -154,7 +155,7 @@ class FolloPowerButton @JvmOverloads constructor(context: Context, attrs: Attrib
     if (holding) {
       val p = FolloRules.powerProgress(SystemClock.uptimeMillis() - holdStart)
       paint.strokeWidth = 3f * density
-      paint.color = 0xFFFFFFFF.toInt()
+      paint.color = red // the ring fills red: held long enough, the app turns Off
       val rr = radius - 1.5f * density
       arc.set(cx - rr, cy - rr, cx + rr, cy + rr)
       canvas.drawArc(arc, -90f, 360f * p, false, paint)

@@ -307,4 +307,156 @@ object FolloRules {
         secondStep -> CheckInAction.NOTHING
         else -> CheckInAction.HELLO
       }
+
+  // ── Screen, round 2 (Alex, 14 Nov 2026; wording page version 21) ────────────────────────────────
+
+  /** A local clock time, short: 6:00 → "6am", 18:30 → "6:30pm". */
+  fun shortTime(epochS: Long, zone: java.time.ZoneId): String {
+    val t = java.time.Instant.ofEpochSecond(epochS).atZone(zone)
+    val h12 = if (t.hour % 12 == 0) 12 else t.hour % 12
+    val ampm = if (t.hour < 12) "am" else "pm"
+    return if (t.minute == 0) "$h12$ampm" else "$h12:${"%02d".format(t.minute)}$ampm"
+  }
+
+  /**
+   * The search hours for the "Waiting until you're in the search area (6am-6pm)" banner (tile 3, which since 14 Nov
+   * 2026 also stands in for the old "no search right now" and plain "Standing by" banners): the window open now, else
+   * the next one, in the phone's own time zone. Windows of [preferArea] (the area of the nearest held circle) win, so a
+   * phone in Tasmania is not shown a Queensland window an hour off. Null when no window is known.
+   */
+  fun hoursText(windows: List<Window>?, nowS: Long, zone: java.time.ZoneId, preferArea: String? = null): String? {
+    val ahead = windows.orEmpty().filter { it.end > nowS && it.end > it.start }
+    if (ahead.isEmpty()) return null
+    val pool = ahead.filter { it.area == preferArea }.ifEmpty { ahead }
+    val w = pool.filter { it.openAt(nowS) }.minByOrNull { it.start } ?: pool.minByOrNull { it.start } ?: return null
+    return "${shortTime(w.start, zone)}-${shortTime(w.end, zone)}"
+  }
+
+  /** First tick: a FOLLO status element arrived today (local date), so the phone holds today's circles. */
+  fun checkedInToday(receivedAtMs: Long, nowMs: Long, zone: java.time.ZoneId): Boolean =
+      receivedAtMs > 0L &&
+          java.time.Instant.ofEpochMilli(receivedAtMs).atZone(zone).toLocalDate() ==
+              java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+
+  /** Third tick: this build is the newest the volunteers can install (status `latest`); not known ⇒ yes. */
+  fun isLatest(ownCode: Long, latestCode: Long?): Boolean = latestCode == null || ownCode >= latestCode
+
+  const val TICK_OK = "✅"
+  const val TICK_WARN = "⚠️"
+
+  /** The offline map as the check text tells it. */
+  data class MapCheck(val saved: Boolean, val savingPercent: Int? = null, val waitingForWifi: Boolean = false)
+
+  /**
+   * The text the ticks share (Alex, 14 Nov 2026: "they may want to SMS me their version number, circle date, and other
+   * diagnostic info"). Nothing about where the phone is.
+   */
+  fun checkText(
+      phone: String,
+      device: String,
+      os: String,
+      statusAtMs: Long,
+      nowMs: Long,
+      zone: java.time.ZoneId,
+      map: MapCheck,
+      version: String,
+      versionCode: Long,
+      latestCode: Long?,
+      latestVersion: String?,
+      circlesDay: String? = null,
+  ): String {
+    val today = checkedInToday(statusAtMs, nowMs, zone)
+    // the held circles' own date from Edit Circles (Alex asked for the "circle date"), when they carry one
+    val set = circlesDay?.let { " (circles of $it)" } ?: ""
+    val circles =
+        when {
+          today -> "$TICK_OK Circles: checked in today, ${clock(statusAtMs, zone)}$set"
+          statusAtMs > 0L -> "$TICK_WARN Circles: last checked in ${dayClock(statusAtMs, zone)}$set"
+          else -> "$TICK_WARN Circles: never checked in"
+        }
+    val offline =
+        if (map.saved) "$TICK_OK Offline map: on this phone"
+        else
+            "$TICK_WARN Offline map: not on this phone" +
+                when {
+                  map.savingPercent != null -> ", saving ${map.savingPercent}%"
+                  map.waitingForWifi -> ", waiting for Wi-Fi"
+                  else -> ""
+                }
+    val app =
+        when {
+          latestCode == null -> "$TICK_OK App: $version"
+          versionCode >= latestCode -> "$TICK_OK App: $version, the latest"
+          else -> "$TICK_WARN App: $version, latest is ${latestVersion ?: latestCode.toString()}"
+        }
+    return listOf("FOLLO Tracks check", "Phone: $phone ($device, $os)", circles, offline, app).joinToString("\n")
+  }
+
+  private fun clock(ms: Long, zone: java.time.ZoneId): String =
+      java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.ENGLISH)
+          .format(java.time.Instant.ofEpochMilli(ms).atZone(zone))
+          .lowercase(java.util.Locale.ENGLISH)
+
+  private fun dayClock(ms: Long, zone: java.time.ZoneId): String {
+    val t = java.time.Instant.ofEpochMilli(ms).atZone(zone)
+    return java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.ENGLISH).format(t) + ", " + clock(ms, zone)
+  }
+
+  // ── The phone's own position (Alex 13 Nov 2026: "Need GDA2020 coordinates somewhere. Long press on them will offer
+  // OS's share option"; 14 Nov: the pill drops the "GDA2020" word, the shared text keeps it) ─────────────────────
+
+  /** The pill over the map: "-41.123456, 146.654321". */
+  fun coordsText(lat: Double, lon: Double): String =
+      String.format(java.util.Locale.US, "%.6f, %.6f", lat, lon)
+
+  /** What a long press shares: "GDA2020 -41.123456, 146.654321 (MGA55 E 470982 N 5447480)". */
+  fun coordsShare(lat: Double, lon: Double): String {
+    val g = mga(lat, lon)
+    return "GDA2020 ${coordsText(lat, lon)} (MGA${g.zone} E ${Math.round(g.easting)} N ${Math.round(g.northing)})"
+  }
+
+  data class Grid(val zone: Int, val easting: Double, val northing: Double)
+
+  /**
+   * MGA2020 (UTM on GRS80) for a GDA2020 latitude and longitude, zone from the longitude (55 Tasmania, 56 south-east
+   * Queensland). Krüger series to the 4th order (Karney 2011): well under a millimetre inside a zone. The phone's fix is
+   * taken as GDA2020 (it differs from WGS84 by centimetres).
+   */
+  fun mga(lat: Double, lon: Double): Grid {
+    val zone = Math.floorDiv((lon + 180.0).toInt(), 6) + 1
+    val lon0 = Math.toRadians(zone * 6.0 - 183.0)
+    val a = 6378137.0
+    val f = 1 / 298.257222101
+    val k0 = 0.9996
+    val n = f / (2 - f)
+    val n2 = n * n
+    val n3 = n2 * n
+    val n4 = n3 * n
+    val bigA = a / (1 + n) * (1 + n2 / 4 + n4 / 64)
+    val alpha =
+        doubleArrayOf(
+            n / 2 - 2.0 / 3 * n2 + 5.0 / 16 * n3 + 41.0 / 180 * n4,
+            13.0 / 48 * n2 - 3.0 / 5 * n3 + 557.0 / 1440 * n4,
+            61.0 / 240 * n3 - 103.0 / 140 * n4,
+            49561.0 / 161280 * n4,
+        )
+    val phi = Math.toRadians(lat)
+    val dl = Math.toRadians(lon) - lon0
+    val e2n = 2 * kotlin.math.sqrt(n) / (1 + n)
+    val t = kotlin.math.sinh(atanhOf(kotlin.math.sin(phi)) - e2n * atanhOf(e2n * kotlin.math.sin(phi)))
+    val xi0 = kotlin.math.atan2(t, kotlin.math.cos(dl))
+    val eta0 = atanhOf(kotlin.math.sin(dl) / kotlin.math.sqrt(1 + t * t))
+    var xi = xi0
+    var eta = eta0
+    for (j in 1..4) {
+      xi += alpha[j - 1] * kotlin.math.sin(2 * j * xi0) * kotlin.math.cosh(2 * j * eta0)
+      eta += alpha[j - 1] * kotlin.math.cos(2 * j * xi0) * kotlin.math.sinh(2 * j * eta0)
+    }
+    val easting = 500000.0 + k0 * bigA * eta
+    val northing = (if (lat < 0) 10000000.0 else 0.0) + k0 * bigA * xi
+    return Grid(zone, easting, northing)
+  }
+
+  private fun atanhOf(x: Double): Double = 0.5 * kotlin.math.ln((1 + x) / (1 - x))
 }
+

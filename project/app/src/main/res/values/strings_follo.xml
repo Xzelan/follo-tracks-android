@@ -21,16 +21,16 @@
     <!-- 28 Oct 2026 review B10: amber while inside the area but not actually tracking; same words on iOS -->
     <string name="follo_waiting_title">Waiting for FOLLO to start tracking</string>
     <string name="follo_waiting_sub">Press and hold the card below to check in now</string>
-    <string name="follo_waiting_nosignal_sub">No signal yet, so FOLLO can\'t start this phone. It starts by itself when signal returns</string>
+    <!-- 14 Nov 2026 (Alex, wording page tile 8) -->
+    <string name="follo_waiting_nosignal_sub">No signal yet, so no tracklogs recorded. It starts by itself when signal returns</string>
     <string name="follo_waiting_fix_title">Waiting for a GPS fix</string>
     <string name="follo_waiting_fix_sub">No position for over a minute. Keep the phone where it can see the sky</string>
 
-    <string name="follo_standby_title">Standing by</string>
-    <!-- 28 Oct 2026 review B13: a phone already inside the area when the hours start gets no enter event, so it only
-         starts on its next post (e.g. the check-in when the app is opened) -->
-    <string name="follo_standby_sub">Sharing starts when you enter the search area in search hours, or when you open the app inside it</string>
     <!-- 13 Nov 2026: one line, no second line of its own (the server's line, when it sends one, still goes under) -->
     <string name="follo_standby_outside_title">Waiting until you\'re in the search area</string>
+    <!-- 14 Nov 2026 (Alex, wording page tile 3): with the search hours, e.g. "(6am-6pm)"; this banner also replaces the
+         old "Standing by: no search right now" and plain "Standing by" ones (tiles 4 and 5 dropped) -->
+    <string name="follo_standby_outside_hours">Waiting until you\'re in the search area (%1$s)</string>
     <!-- Under Standing by: which searches' wake-up circles the phone holds (Alex 25 Oct 2026; same wording on iOS) -->
     <string name="follo_ready_for">✓ Ready for %1$s</string>
     <!-- 1 Nov 2026 Edit Circles: appended to the Ready line when the held wake circles carry a date (4th word of
@@ -39,9 +39,6 @@
     <!-- 28 Oct 2026 review B11: a check-in needs a fix better than 100 m, which indoors may never come -->
     <!-- 13 Nov 2026: a notice just above the card (it was the banner's last line) -->
     <string name="follo_ready_none">No search area loaded yet: please go outside so the phone can check in</string>
-    <string name="follo_standby_nosearch_title">Standing by: no search right now</string>
-    <string name="follo_next_search">"Next search: %1$s. "</string>
-    <string name="follo_nosearch_tail">FOLLO doesn\'t keep check-ins outside search hours</string>
     <string name="follo_until">%1$s, until %2$s</string>
 
     <!-- Power button (Alex, 13 Nov 2026): hold 2 s = Off (no location at all), one tap = on again; same words on iOS -->
@@ -73,10 +70,12 @@
     <!-- 24 Oct 2026: the steps live in the banner (a toast vanishes behind Settings). Tyrone, Android 14+ stock: the
          "Allow background usage" SWITCH on = Optimised, which doesn't count; Unrestricted is behind the row's words.
          26 Oct 2026: Android 12+ opens FOLLO Tracks' own App info page (Paul: the battery list didn't show the app). -->
-    <string name="follo_battery_sub">Battery saving may stop tracking when the screen is off. Tap Allow battery use, show All apps, tap FOLLO Tracks and choose Don\'t optimise</string>
-    <string name="follo_battery_sub_samsung">Battery saving may stop tracking when the screen is off. Tap Allow battery use, scroll down, tap Battery and choose Unrestricted</string>
-    <string name="follo_battery_sub_14">Battery saving may stop tracking when the screen is off. Tap Allow battery use, tap App battery usage, tap the words Allow background usage (not the switch) and choose Unrestricted</string>
-    <string name="follo_battery_sub_12">Battery saving may stop tracking when the screen is off. Tap Allow battery use, tap Battery (or App battery usage) and choose Unrestricted</string>
+    <string name="follo_battery_sub">Tap Allow battery use, show All apps, tap FOLLO Tracks and choose Don\'t optimise</string>
+    <string name="follo_battery_sub_samsung">Tap Allow battery use, scroll down, tap Battery and choose Unrestricted</string>
+    <string name="follo_battery_sub_14">Tap Allow battery use, tap App battery usage, tap the words Allow background usage (not the switch) and choose Unrestricted</string>
+    <string name="follo_battery_sub_12">Tap Allow battery use, tap Battery (or App battery usage) and choose Unrestricted</string>
+    <!-- 14 Nov 2026 (Alex, wording page tile 15): the four lines above lost "Battery saving may stop tracking when the
+         screen is off." -->
     <string name="follo_battery_btn">Allow battery use</string>
     <string name="follo_battery_howto">Find FOLLO Tracks in the list and choose Don\'t optimise</string>
     <string name="follo_battery_howto_samsung">Scroll down › Battery › Unrestricted</string>
@@ -88,19 +87,14 @@
     <string name="follo_last_sent">Last sent %1$s</string>
     <string name="follo_last_sent_just_now">Last sent just now</string>
     <string name="follo_last_none">Nothing sent yet</string>
-    <string name="follo_battery">Battery %1$d%%</string>
     <string name="follo_waiting">%1$d waiting to send</string>
     <string name="follo_recentre">Recentre the map on you</string>
-    <string name="follo_recentre_hint">Recentre</string>
     <string name="follo_notif_standby">FOLLO Tracks: standing by</string>
     <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
     <string name="follo_area_label">Search area</string>
     <string name="follo_rotate">Turn the screen a quarter turn</string>
     <string name="follo_location_howto">Permissions › Location › Allow all the time</string>
     <string name="follo_notif_off_note">Notifications are off — the app still works</string>
-    <string name="follo_offline_saving">Saving offline map: %1$d%%</string>
-    <string name="follo_offline_waiting">Offline map: waiting for Wi-Fi. Tap to use mobile data</string>
-    <string name="follo_offline_saved">Offline map saved</string>
     <string name="follo_offline_ask_title">Download the offline map now?</string>
     <string name="follo_offline_ask_msg">About %1$d MB of mobile data.</string>
     <string name="follo_offline_ask_yes">Download</string>
@@ -111,6 +105,20 @@
     <string name="follo_bg_reminder_msg">Tracking stops when your screen locks, so the line sees you only while the phone is in your hand. In Settings choose Permissions › Location › Allow all the time.</string>
     <string name="follo_bg_reminder_open">Open Settings</string>
     <string name="follo_send_now">Sending your position…</string>
+    <!-- Screen round 2 (14 Nov 2026): the three ticks at the bottom right and the phone's own position -->
+    <string name="follo_tick_map">map</string>
+    <string name="follo_tick_app">app</string>
+    <string name="follo_ticks_cd">Phone check: %1$s. Tap to share it</string>
+    <string name="follo_tick_circles_ok">checked in today</string>
+    <string name="follo_tick_circles_bad">not checked in today</string>
+    <string name="follo_tick_map_ok">offline map saved</string>
+    <string name="follo_tick_map_bad">no offline map</string>
+    <string name="follo_tick_app_ok">latest app</string>
+    <string name="follo_tick_app_bad">app out of date</string>
+    <string name="follo_check_share">Share the phone check</string>
+    <string name="follo_offline_ask_share">Share check</string>
+    <string name="follo_coords_cd">Your position %1$s. Press and hold to share it</string>
+    <string name="follo_coords_share">Share your position</string>
 
     <string name="follo_setup_title">Set up FOLLO Tracks?</string>
     <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>

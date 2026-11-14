@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- "Back to where I am": a ring with a dot and four ticks, beside the card's Recentre (13 Nov 2026) -->
+<!-- The recentre button's symbol (wording page v12, 13 Nov 2026): four arrows pointing in to the middle, in follo_green on
+     the round light button; the button shows only while the map is held away from the arrow -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="18dp" android:height="18dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#00000000" android:strokeColor="#1E6B3A" android:strokeWidth="2.2"
-        android:pathData="M12,5 a7,7 0 1,0 0.01,0 Z" />
-    <path android:fillColor="#1E6B3A" android:pathData="M12,9 a3,3 0 1,0 0.01,0 Z" />
-    <path android:fillColor="#00000000" android:strokeColor="#1E6B3A" android:strokeWidth="2.2" android:strokeLineCap="round"
-        android:pathData="M12,1.5 V5 M12,19 V22.5 M1.5,12 H5 M19,12 H22.5" />
+    android:width="26dp" android:height="26dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="@color/follo_green" android:strokeWidth="1.9"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M12,1.8 V9 M8.6,5.6 L12,9 L15.4,5.6 M12,22.2 V15 M8.6,18.4 L12,15 L15.4,18.4 M1.8,12 H9 M5.6,8.6 L9,12 L5.6,15.4 M22.2,12 H15 M18.4,8.6 L15,12 L18.4,15.4" />
 </vector>

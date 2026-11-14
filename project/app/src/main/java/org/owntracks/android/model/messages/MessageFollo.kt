@@ -90,6 +90,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
         val end = row.getOrNull(2)?.content?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
         org.owntracks.android.ui.main.FolloRules.Window(area, start, end)
       }
+  /**
+   * The newest builds the volunteers can install (server 14 Nov 2026): the third tick at the bottom right says whether
+   * this phone has it. Null = an older server, or not known.
+   */
+  var latest: FolloLatest? = null
   /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
   /**
@@ -141,6 +146,14 @@ class FolloOff {
   var km: Double? = null
   var cap: Int? = null
   var free: Int? = null
+}
+
+/** Newest volunteer builds (D1 meta 'appver'): TestFlight external build, Play closed-testing versionCode and name. */
+@Serializable
+class FolloLatest {
+  var ios: Long? = null
+  var android: Long? = null
+  var androidv: String? = null
 }
 
 /** The pair partner: its tracker ID and its location topic (= the teammate's contact id on this phone). */

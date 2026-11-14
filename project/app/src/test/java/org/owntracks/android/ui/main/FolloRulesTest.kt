@@ -325,4 +325,121 @@ class FolloRulesTest {
     assertEquals(0, FolloRules.nextTurn(-90))
     assertEquals(180, FolloRules.nextTurn(100))
   }
+
+  // ── Screen, round 2 (14 Nov 2026) ─────────────────────────────────────────────────────
+
+  private val hobart = java.time.ZoneId.of("Australia/Hobart")
+  private val brisbane = java.time.ZoneId.of("Australia/Brisbane")
+
+  private fun at(zone: java.time.ZoneId, y: Int, mo: Int, d: Int, h: Int, mi: Int = 0): Long =
+      java.time.ZonedDateTime.of(y, mo, d, h, mi, 0, 0, zone).toEpochSecond()
+
+  @Test
+  fun `short times drop the minutes on the hour`() {
+    assertEquals("6am", FolloRules.shortTime(at(hobart, 2026, 11, 15, 6), hobart))
+    assertEquals("6pm", FolloRules.shortTime(at(hobart, 2026, 11, 15, 18), hobart))
+    assertEquals("12pm", FolloRules.shortTime(at(hobart, 2026, 11, 15, 12), hobart))
+    assertEquals("12am", FolloRules.shortTime(at(hobart, 2026, 11, 15, 0), hobart))
+    assertEquals("6:30am", FolloRules.shortTime(at(hobart, 2026, 11, 15, 6, 30), hobart))
+  }
+
+  @Test
+  fun `the search hours are the open window, else the next one, near areas first`() {
+    val wins =
+        listOf(
+            FolloRules.Window("MV", at(hobart, 2026, 11, 15, 6), at(hobart, 2026, 11, 15, 18)),
+            FolloRules.Window("DW", at(brisbane, 2026, 11, 15, 6), at(brisbane, 2026, 11, 15, 18)),
+            FolloRules.Window("MV", at(hobart, 2026, 11, 16, 6), at(hobart, 2026, 11, 16, 18)),
+        )
+    // the night before: the next window
+    assertEquals("6am-6pm", FolloRules.hoursText(wins, at(hobart, 2026, 11, 14, 22), hobart, "MV"))
+    // during the day: the open one
+    assertEquals("6am-6pm", FolloRules.hoursText(wins, at(hobart, 2026, 11, 15, 12), hobart, "MV"))
+    // a Queensland phone near DW sees DW's hours in its own time, not the Tasmanian ones (an hour off in summer)
+    assertEquals("6am-6pm", FolloRules.hoursText(wins, at(brisbane, 2026, 11, 15, 12), brisbane, "DW"))
+    assertEquals("5am-5pm", FolloRules.hoursText(wins, at(brisbane, 2026, 11, 15, 12), brisbane, "MV"))
+    // no nearby area known: any window
+    assertEquals("6am-6pm", FolloRules.hoursText(wins, at(hobart, 2026, 11, 15, 12), hobart, null))
+    // nothing known, or everything over
+    assertNull(FolloRules.hoursText(null, 0, hobart))
+    assertNull(FolloRules.hoursText(wins, at(hobart, 2026, 11, 17, 12), hobart, "MV"))
+  }
+
+  @Test
+  fun `the first tick needs a status from today`() {
+    val now = at(hobart, 2026, 11, 15, 9) * 1000
+    assertTrue(FolloRules.checkedInToday(at(hobart, 2026, 11, 15, 0, 5) * 1000, now, hobart))
+    assertFalse(FolloRules.checkedInToday(at(hobart, 2026, 11, 14, 23, 55) * 1000, now, hobart))
+    assertFalse(FolloRules.checkedInToday(0L, now, hobart))
+  }
+
+  @Test
+  fun `the third tick compares version codes, unknown counts as latest`() {
+    assertTrue(FolloRules.isLatest(400139000, 400138000))
+    assertTrue(FolloRules.isLatest(400139000, 400139000))
+    assertFalse(FolloRules.isLatest(400135000, 400139000))
+    assertTrue(FolloRules.isLatest(400139000, null))
+  }
+
+  @Test
+  fun `the check text says each tick in words`() {
+    val now = at(hobart, 2026, 11, 15, 9, 41) * 1000
+    val good =
+        FolloRules.checkText(
+            "Green-IP · tracker IP", "Samsung SM-A145P", "Android 14",
+            at(hobart, 2026, 11, 15, 9, 12) * 1000, now, hobart,
+            FolloRules.MapCheck(saved = true), "0.1.39", 400139000, 400139000, "0.1.39",
+        )
+    assertEquals(
+        "FOLLO Tracks check\n" +
+            "Phone: Green-IP · tracker IP (Samsung SM-A145P, Android 14)\n" +
+            "✅ Circles: checked in today, 9:12 am\n" +
+            "✅ Offline map: on this phone\n" +
+            "✅ App: 0.1.39, the latest",
+        good,
+    )
+    val bad =
+        FolloRules.checkText(
+            "Tracker AB", "Samsung SM-A145P", "Android 14",
+            at(hobart, 2026, 11, 9, 16, 5) * 1000, now, hobart,
+            FolloRules.MapCheck(saved = false, savingPercent = 45), "0.1.35", 400135000, 400139000, "0.1.39",
+        )
+    assertTrue(bad.contains("⚠️ Circles: last checked in Mon 9 Nov, 4:05 pm"))
+    val dated =
+        FolloRules.checkText("x", "y", "Android 14", at(hobart, 2026, 11, 15, 9, 12) * 1000, now, hobart,
+            FolloRules.MapCheck(saved = true), "0.1.39", 400139000, 400139000, "0.1.39", circlesDay = "9.11.2026")
+    assertTrue(dated.contains("✅ Circles: checked in today, 9:12 am (circles of 9.11.2026)"))
+    assertTrue(bad.contains("⚠️ Offline map: not on this phone, saving 45%"))
+    assertTrue(bad.endsWith("⚠️ App: 0.1.35, latest is 0.1.39"))
+    val never =
+        FolloRules.checkText("FOLLO Tracks", "x", "Android 14", 0L, now, hobart,
+            FolloRules.MapCheck(saved = false, waitingForWifi = true), "0.1.39", 400139000, null, null)
+    assertTrue(never.contains("⚠️ Circles: never checked in"))
+    assertTrue(never.contains("not on this phone, waiting for Wi-Fi"))
+    assertTrue(never.endsWith("✅ App: 0.1.39"))
+  }
+
+  @Test
+  fun `MGA2020 matches the reference projection to a centimetre`() {
+    // Reference values: PROJ (pyproj) EPSG:7844 GDA2020 -> EPSG:7855 / 7856, 14 Nov 2026
+    fun check(lat: Double, lon: Double, zone: Int, e: Double, n: Double) {
+      val g = FolloRules.mga(lat, lon)
+      assertEquals(zone, g.zone)
+      assertEquals(e, g.easting, 0.01)
+      assertEquals(n, g.northing, 0.01)
+    }
+    check(-41.123456, 146.654321, 55, 470982.15622550825, 5447480.43256749)
+    check(-42.8821, 147.3272, 55, 526720.478479885, 5252225.743666746)
+    check(-41.0, 147.0, 55, 500000.00000000215, 5461242.938201998)
+    check(-27.62, 153.09, 56, 508879.87688887987, 6944887.7825414)
+  }
+
+  @Test
+  fun `the coordinates pill and its shared text`() {
+    assertEquals("-41.123456, 146.654321", FolloRules.coordsText(-41.123456, 146.654321))
+    assertEquals(
+        "GDA2020 -41.123456, 146.654321 (MGA55 E 470982 N 5447480)",
+        FolloRules.coordsShare(-41.123456, 146.654321),
+    )
+  }
 }

@@ -106,16 +106,14 @@ class MainActivity :
   private lateinit var map: MapView
   private var myLocationOverlay: MyLocationNewOverlay? = null
   private var service: BackgroundService? = null
-  private var bannerBasePaddingTop = 0
-  private var cardBaseMarginBottom = 0
-  /** The navigation bar's height, for the foot of the screen (kept for applyOrientation) */
+  /** The system bars (and any camera cut-out) round the screen, for where the panels and buttons go */
   private var barsBottom = 0
-  /** The status bar's height and the system bars at the right (sideways), for the rotate button's place */
   private var barsTop = 0
   private var barsRight = 0
-  /** Where on the card the finger last went down: a tap on the offline map's sign is not a "recentre" */
-  private var cardDownX = 0f
-  private var cardDownY = 0f
+  private var barsLeft = 0
+  /** The navigation bar alone at the sides (sideways): the bottom band stops at it, but runs on under a camera cut-out */
+  private var navLeft = 0
+  private var navRight = 0
   private var state: Banner? = null
   /** True while a system permission prompt is up; the banner then says "Setting up" instead of red. */
   private var promptInFlight = false
@@ -238,25 +236,18 @@ class MainActivity :
     FolloTileCache.configure(this) // before the layout: the MapView opens the tile cache as it is created
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
-    // The version, so a phone's build can be read off its screen at base camp (1 Nov 2026). Since the compact screen of
-    // 13 Nov 2026 it is the last pill of the bottom line ("0.1.38", or "0.1.38 (2)" for a rebuild), not a heading.
-    binding.build.text =
-        if (BuildConfig.FOLLO_BUILD > 0) "${BuildConfig.VERSION_NAME} (${BuildConfig.FOLLO_BUILD})" else BuildConfig.VERSION_NAME
-
-    bannerBasePaddingTop = binding.banner.paddingTop
-    cardBaseMarginBottom = binding.bottom.paddingBottom
-    val creditBaseMarginBottom = (binding.creditBar.layoutParams as android.view.ViewGroup.MarginLayoutParams).bottomMargin
+    // The version is no longer on the screen (14 Nov 2026): the third tick says whether it is the latest, and the
+    // ticks' shared check names it.
     ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
-      val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+      val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      val nav = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
       barsBottom = bars.bottom
       barsTop = bars.top
       barsRight = bars.right
-      placeRotate()
-      binding.banner.updatePadding(top = bannerBasePaddingTop + bars.top)
-      applyFoot()
-      binding.creditBar.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
-        bottomMargin = creditBaseMarginBottom + bars.bottom
-      }
+      barsLeft = bars.left
+      navLeft = nav.left
+      navRight = nav.right
+      applyOrientation(resources.configuration.orientation)
       windowInsets
     }
 
@@ -266,9 +257,24 @@ class MainActivity :
     screenTurner = FolloScreenTurner(this)
     screenTurner.open(savedInstanceState?.takeIf { it.containsKey(TURN_KEY) }?.getInt(TURN_KEY))
     binding.rotate.setOnClickListener { screenTurner.turn() }
-    // under the banner, which grows and shrinks with its state
-    binding.banner.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-      if (bottom - top != oldBottom - oldTop) placeRotate()
+    binding.recentre.setOnClickListener { recentre() }
+    // The buttons hang under the banner and the position sits on the card, both of which grow and shrink with what
+    // they say: place them again after any change (posted: a layout change asked for inside a layout pass is lost)
+    val replace = android.view.View.OnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+      if (l != ol || t != ot || r != or || b != ob) binding.root.post { placeOverlays() }
+    }
+    binding.banner.addOnLayoutChangeListener(replace)
+    binding.bottom.addOnLayoutChangeListener(replace)
+    binding.notice.addOnLayoutChangeListener(replace)
+    binding.creditBar.addOnLayoutChangeListener { _, _, t, _, b, _, ot, _, ob ->
+      if (b - t != ob - ot) binding.root.post { applyFoot() }
+    }
+    // The three ticks: one tap shares the phone check (Alex, 14 Nov 2026)
+    binding.ticks.setOnClickListener { onTicksClicked() }
+    // The phone's own position: press and hold shares it (Alex, 13 Nov 2026)
+    binding.coords.setOnLongClickListener {
+      shareCoords()
+      true
     }
     applyOrientation(resources.configuration.orientation)
     setUpMap()
@@ -280,18 +286,9 @@ class MainActivity :
     binding.power.onTurnOff = { setPower(off = true) }
     binding.power.onTurnOn = { setPower(off = false) }
     binding.power.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
-    // The card recentres; a tap on the offline map's sign (a small thing, so with room round it) says how the saving
-    // stands instead (13 Nov 2026)
-    @Suppress("ClickableViewAccessibility")
-    binding.card.setOnTouchListener { _, e ->
-      if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-        cardDownX = e.x
-        cardDownY = e.y
-      }
-      false
-    }
-    binding.card.setOnClickListener { if (onOfflineSign()) onOfflineClicked() else recentre() }
-    binding.banner.setOnClickListener { recentre() } // top or bottom, either one brings the arrow back (Alex 24 Oct 2026)
+    // The recentre button brings the arrow back (14 Nov 2026: a tap on the card no longer does); a tap on the banner
+    // still does (Alex 24 Oct 2026). The offline map's sign on the card is gone: the second tick says it.
+    binding.banner.setOnClickListener { recentre() }
     // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
     binding.card.setOnLongClickListener {
       if (!FolloPower.isOff && requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
@@ -420,58 +417,164 @@ class MainActivity :
     handleIntent(intent)
   }
 
-  // The activity keeps running through a rotation (configChanges), so the map and its state survive;
-  // the layout is switched here instead: portrait = banner across the top, card along the bottom;
-  // landscape (phone in a holder sideways) = status and card in a column on the left, map on the right.
+  // The activity keeps running through a rotation (configChanges), so the map and its state survive; the layout is
+  // switched here instead: upright = banner across the top, card above the bottom band; sideways (14 Nov 2026) = the
+  // status panel in the top right corner and the card in the bottom right corner on the band, over a full-screen map.
   override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
     super.onConfigurationChanged(newConfig)
     applyOrientation(newConfig.orientation)
     // Let the camera place the dot afresh for the new shape of the visible map.
     centredOnce = false
     camRef = null
-    // After the layout pass, so visible() sees the side panel where it now is (not where it was).
+    // After the layout pass, so visible() sees the panels where they now are (not where they were).
     if (camera == Camera.NAV) binding.root.doOnLayout {
       setNavLook(true)
-      requestNavFrame() // arrow back on its 80 % spot in the new shape at once
+      requestNavFrame() // arrow back on its spot in the new shape at once
     }
   }
+
+  private fun isLand() = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+  private fun dp(v: Float) = (v * resources.displayMetrics.density).roundToInt()
+
+  /** Sideways, the status panel and the card are this wide (plus the navigation bar's width when it is on the right). */
+  private fun panelWidth() = dp(SIDE_PANEL_DP)
 
   private fun applyOrientation(orientation: Int) {
+    if (!::binding.isInitialized) return
     val land = orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val match = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+    val wrap = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+    // Sideways the status bar stays across the top: a strip in the banner's colour behind it
+    binding.statusStrip.visibility = if (land && barsTop > 0) View.VISIBLE else View.GONE
+    binding.statusStrip.updateLayoutParams<android.widget.FrameLayout.LayoutParams> { height = barsTop }
+    // The banner: across the top upright (under the status bar); the status panel sideways, hard into the top right
+    // corner under the status bar, its colour running on under a navigation bar on the right (its words stop before it)
     binding.banner.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
-      height = if (land) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+      width = if (land) panelWidth() + barsRight else match
+      height = wrap
+      topMargin = if (land) barsTop else 0
+      gravity = android.view.Gravity.TOP or android.view.Gravity.END
     }
-    // the notice and the card: the side panel's width when the phone is sideways (the card is 288 dp plus its padding)
+    binding.banner.updatePadding(
+        left = dp(if (land) 16f else 20f) + if (land) 0 else barsLeft,
+        top = dp(6f) + if (land) 0 else barsTop,
+        right = dp(14f) + barsRight,
+    )
+    bannerBg = null // the panel's shape changes: draw it again
+    state?.let { setBannerColor(it.color) }
+    // The notice and the card: sideways as wide as the status panel, hard into the right side, sitting on the band.
+    // A little padding at the start and top keeps the card's shadow from being cut off.
+    val shadow = dp(8f)
     binding.bottom.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      width = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else android.view.ViewGroup.LayoutParams.MATCH_PARENT
-      gravity = if (land) android.view.Gravity.BOTTOM or android.view.Gravity.START else android.view.Gravity.BOTTOM
+      width = if (land) panelWidth() + barsRight + shadow else match
+      gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
     }
-    // the bottom line runs under the card when upright, under the map (right of the side panel) when sideways
+    binding.card.minimumHeight = if (land) dp(LAND_CARD_DP) else 0
+    binding.card.updatePadding(
+        left = dp(16f),
+        top = dp(if (land) 8f else 13f),
+        right = dp(14f) + if (land) barsRight else 0,
+        bottom = dp(if (land) 8f else 13f),
+    )
+    binding.notice.updatePadding(left = dp(if (land) 16f else 12f), right = dp(12f) + if (land) barsRight else 0)
+    binding.notice.updateLayoutParams<android.widget.LinearLayout.LayoutParams> { bottomMargin = if (land) 0 else dp(8f) }
+    styleBottom()
+    // The bottom band: the whole width (sideways it stops at a navigation bar on either side), down to the foot of the
+    // screen; its row sits just above the navigation bar
     binding.creditBar.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      marginStart = (if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0) + (16 * resources.displayMetrics.density).toInt()
+      marginStart = if (land) navLeft else 0
+      marginEnd = if (land) navRight else 0
     }
-    // the Off words sit in the part of the screen the map shows in: right of the side panel when the phone is sideways
-    binding.offCover.updatePadding(left = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0)
+    binding.creditBar.updatePadding(
+        left = dp(12f) + barsLeft - if (land) navLeft else 0,
+        right = dp(8f) + barsRight - if (land) navRight else 0,
+        bottom = barsBottom + dp(if (land) 5f else 4f),
+    )
+    // the Off words sit in the part of the screen the map would show: left of the panels when the phone is sideways
+    binding.offCover.updatePadding(
+        right = if (land) panelWidth() + barsRight else 0,
+        top = if (land) barsTop else 0,
+    )
     applyFoot()
-    placeRotate()
+    placeOverlays()
   }
 
+  /** Sideways, only the corner that faces the map is rounded; upright the panels keep their usual look. */
+  private fun styleBottom() {
+    val land = isLand()
+    val r = dp(16f).toFloat()
+    val noticeShown = binding.notice.visibility == View.VISIBLE
+    fun corner(color: Int, topLeft: Float) =
+        android.graphics.drawable.GradientDrawable().apply {
+          setColor(color)
+          cornerRadii = floatArrayOf(topLeft, topLeft, 0f, 0f, 0f, 0f, 0f, 0f)
+        }
+    if (land) {
+      binding.card.background = corner(getColor(R.color.follo_card), if (noticeShown) 0f else r)
+      binding.notice.background = corner(getColor(R.color.follo_amber), r)
+    } else {
+      binding.card.setBackgroundResource(R.drawable.bg_follo_card)
+      binding.notice.setBackgroundResource(R.drawable.bg_follo_notice)
+    }
+  }
+
+  private var bannerBg: Pair<Int, Boolean>? = null
+
+  /** The banner's colour; sideways a panel with its bottom left corner rounded, and the strip behind the status bar. */
+  private fun setBannerColor(color: Int) {
+    val land = isLand()
+    if (bannerBg == color to land) return
+    bannerBg = color to land
+    val r = dp(16f).toFloat()
+    binding.banner.background =
+        if (land)
+            android.graphics.drawable.GradientDrawable().apply {
+              setColor(color)
+              cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, r, r)
+            }
+        else android.graphics.drawable.ColorDrawable(color)
+    binding.statusStrip.setBackgroundColor(color)
+  }
+
+  /** The recentre button's distance from the left edge and the rotate button's from the right edge (px). */
+  private fun recentreStart(): Int = dp(12f) + if (isLand()) barsLeft else 0
+
+  private fun rotateEnd(): Int =
+      if (isLand()) (binding.banner.width.takeIf { it > 0 } ?: (panelWidth() + barsRight)) + dp(10f) else dp(12f)
+
   /**
-   * The rotate button: top right of the map, 12 dp in. Upright it hangs 12 dp under the banner (as tall as its state
-   * makes it); sideways the banner is a column down the left, so it sits 12 dp under the status bar, and clear of the
-   * navigation bar when that is on the right.
+   * The things over the map (14 Nov 2026). Upright: the recentre button top left and the rotate button top right,
+   * 10 dp under the banner. Sideways: the recentre button top left under the status bar, the rotate button level with
+   * it just left of the status panel. The position pill just above the right end of the card (or the notice).
    */
-  private fun placeRotate() {
+  private fun placeOverlays() {
     if (!::binding.isInitialized) return
-    val land = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val gap = (12 * resources.displayMetrics.density).toInt()
-    val top = gap + if (land) barsTop else binding.banner.height
-    val end = gap + if (land) barsRight else 0
+    val land = isLand()
+    val top = if (land) barsTop + dp(12f) else binding.banner.height + dp(10f)
+    val start = recentreStart()
+    val end = rotateEnd()
+    binding.recentre.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      if (topMargin != top || marginStart != start) {
+        topMargin = top
+        marginStart = start
+      }
+    }
     binding.rotate.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
       if (topMargin != top || marginEnd != end) {
         topMargin = top
         marginEnd = end
+      }
+    }
+    val first = if (binding.notice.visibility == View.VISIBLE) binding.notice else binding.card
+    if (binding.root.height > 0 && binding.bottom.height > 0) {
+      val above = binding.root.height - (binding.bottom.top + first.top) + dp(8f)
+      val right = if (land) dp(14f) + barsRight else dp(16f)
+      binding.coords.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+        if (bottomMargin != above || marginEnd != right) {
+          bottomMargin = above
+          marginEnd = right
+        }
       }
     }
   }
@@ -482,13 +585,21 @@ class MainActivity :
   }
 
   /**
-   * How far the card stands off the bottom edge: upright it sits straight above the bottom line; sideways the line is
-   * under the map, not under the card, so the card only clears the edge.
+   * The card sits straight on the bottom band: upright 8 dp above it, sideways on it. The band is as tall as its row
+   * plus the navigation bar under it.
    */
   private fun applyFoot() {
-    val land = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val base = if (land) (12 * resources.displayMetrics.density).toInt() else cardBaseMarginBottom
-    binding.bottom.updatePadding(bottom = base + barsBottom)
+    if (!::binding.isInitialized) return
+    val land = isLand()
+    val band = binding.creditBar.height.takeIf { it > 0 } ?: (dp(4f + 18f) + barsBottom + dp(if (land) 5f else 4f))
+    val shadow = dp(8f)
+    binding.bottom.updatePadding(
+        left = if (land) shadow else dp(16f),
+        top = if (land) shadow else dp(12f),
+        right = if (land) 0 else dp(16f),
+        bottom = band + if (land) 0 else dp(8f),
+    )
+    binding.offCover.updatePadding(bottom = if (land) band else 0)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -564,6 +675,7 @@ class MainActivity :
     if (!::map.isInitialized || shownOff == off) return
     shownOff = off
     binding.offCover.visibility = if (off) View.VISIBLE else View.GONE
+    showRecentre()
     map.visibility = if (off) View.INVISIBLE else View.VISIBLE
     if (off) {
       viewModel.stopLocationUpdates()
@@ -572,7 +684,7 @@ class MainActivity :
       camAnim?.cancel()
       pendingCheckIn = null
       viewModel.saveTrack()
-      binding.credit.visibility = View.GONE // no map, no credit; the version stays
+      binding.credit.visibility = View.INVISIBLE // no map, no credit; the ticks stay
     } else {
       followPaused = false
       centredOnce = false
@@ -1053,31 +1165,25 @@ class MainActivity :
           }
       return Banner(Kind.SHARING, green, title, sub, saysBacklog = queued > 0)
     }
-    return when (if (area != null || ring != null) "outside" else if (windowOver) null else server?.state) {
-      "outside" ->
-          Banner(
-              Kind.STANDBY,
-              grey,
-              s(R.string.follo_standby_outside_title),
-              server?.line?.takeIf { it.isNotBlank() } ?: "",
-          )
-      "nosearch" ->
-          Banner(
-              Kind.STANDBY,
-              grey,
-              s(R.string.follo_standby_nosearch_title),
-              (server?.line?.takeIf { it.isNotBlank() }
-                  ?: ((server?.next?.let { getString(R.string.follo_next_search, it) } ?: "") +
-                      s(R.string.follo_nosearch_tail))),
-          )
-      else ->
-          Banner(
-              Kind.STANDBY,
-              grey,
-              s(R.string.follo_standby_title),
-              server?.line?.takeIf { it.isNotBlank() } ?: s(R.string.follo_standby_sub),
-          )
-    }
+    // Standing by (Alex 14 Nov 2026, wording page): every search area is open 6am-6pm daily, so one banner says it all,
+    // with the hours from this phone's windows; the old "Standing by: no search right now" and plain "Standing by"
+    // banners are gone. The server's own line, when it sends one, still goes under.
+    val hours = FolloRules.hoursText(server?.windows(), nowS, java.time.ZoneId.systemDefault(), nearestArea())
+    return Banner(
+        Kind.STANDBY,
+        grey,
+        if (hours == null) s(R.string.follo_standby_outside_title) else getString(R.string.follo_standby_outside_hours, hours),
+        server?.line?.takeIf { it.isNotBlank() } ?: "",
+    )
+  }
+
+  /** The search area of the held wake-up circle nearest the phone (worked out on the phone; nothing is sent). */
+  private fun nearestArea(): String? {
+    val here = viewModel.currentLocation.value ?: viewModel.lastPublished.value ?: return null
+    return lastWaypoints
+        .mapNotNull { w -> wakeAreaOf(w)?.takeIf { it != "Basecamp" }?.let { it to w } }
+        .minByOrNull { (_, w) -> FolloRules.distanceM(here.latitude, here.longitude, w.geofenceLatitude.value, w.geofenceLongitude.value) }
+        ?.first
   }
 
   /** When sends started failing (0 = the last attempt went through); retries in between don't reset it. */
@@ -1110,7 +1216,7 @@ class MainActivity :
     if (!::binding.isInitialized) return
     val b = currentBanner()
     state = b
-    binding.banner.setBackgroundColor(b.color)
+    setBannerColor(b.color)
     // Only touch a view when its content changes: render() runs on every post (5 s in Move).
     if (binding.title.text.toString() != b.title) binding.title.text = b.title
     if (binding.sub.text.toString() != b.sub) binding.sub.text = b.sub
@@ -1118,18 +1224,16 @@ class MainActivity :
     binding.action.visibility = if (b.button == null) View.GONE else View.VISIBLE
     binding.action.text = b.button ?: ""
     binding.action.setTextColor(b.color)
-    // Power button (13 Nov 2026): there once the phone is set up
+    // Power button (13 Nov 2026; on the card since 14 Nov): there once the phone is set up
     val powerVisibility = if (b.kind == Kind.NOT_SET_UP) View.GONE else View.VISIBLE
     if (binding.power.visibility != powerVisibility) binding.power.visibility = powerVisibility
     binding.power.off = b.kind == Kind.OFF
     // "No search area loaded yet…" above the card: in the standing-by states, until the circles arrive
     val noticeVisibility = if (b.kind == Kind.STANDBY && wakeAreas.isEmpty()) View.VISIBLE else View.GONE
-    if (binding.notice.visibility != noticeVisibility) binding.notice.visibility = noticeVisibility
-    // The circles' day on the bottom line ("9.11.2026"): what is left of "✓ Ready for MV (9-11-2026 update)"
-    val day = wakeUpdate?.takeIf { b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && wakeAreas.isNotEmpty() } ?: ""
-    if (binding.circlesDay.text.toString() != day) binding.circlesDay.text = day
-    val dayVisibility = if (day.isEmpty()) View.GONE else View.VISIBLE
-    if (binding.circlesDay.visibility != dayVisibility) binding.circlesDay.visibility = dayVisibility
+    if (binding.notice.visibility != noticeVisibility) {
+      binding.notice.visibility = noticeVisibility
+      styleBottom() // sideways the card's corner is square under the notice
+    }
 
     val tid = viewModel.trackerId
     binding.who.text =
@@ -1157,7 +1261,7 @@ class MainActivity :
         }
     val queued = backlog()
     if (queued > 0 && !b.saysBacklog) parts += getString(R.string.follo_waiting, queued)
-    viewModel.batteryLevel?.let { parts += getString(R.string.follo_battery, it) }
+    // No battery on the card (Alex 13 Nov 2026: "keep it on live maps"; the phone still sends it)
     val text = parts.joinToString(" · ")
     if (binding.last.text.toString() != text) binding.last.text = text
     // Battery saver (field review 9 Nov 2026: Leonie Ch 55 fixes in 5 h, Heiner, Matt C, Lissa, Mitchell R, Paul, Tyrone,
@@ -1174,6 +1278,123 @@ class MainActivity :
         }
     if (binding.note.text.toString() != note) binding.note.text = note
     binding.note.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
+    renderTicks()
+    renderCoords(b)
+  }
+
+  // ── The ticks at the bottom right and the phone's own position (Alex, 14 Nov 2026) ─────────────────
+
+  /** The three ticks: checked in with FOLLO today, offline map saved, latest app; a warning sign for any that isn't. */
+  private fun renderTicks() {
+    if (!::binding.isInitialized) return
+    val now = System.currentTimeMillis()
+    val st = viewModel.folloStatus.value
+    val circles = st != null && FolloRules.checkedInToday(st.receivedAt, now, java.time.ZoneId.systemDefault())
+    val saved = folloOfflineRepo.state.value is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved
+    val latest = FolloRules.isLatest(BuildConfig.VERSION_CODE.toLong(), st?.message?.latest?.android)
+    fun tick(v: android.widget.TextView, ok: Boolean) {
+      val t = if (ok) FolloRules.TICK_OK else FolloRules.TICK_WARN
+      if (v.text.toString() != t) v.text = t
+    }
+    tick(binding.tickCircles, circles)
+    tick(binding.tickMap, saved)
+    tick(binding.tickApp, latest)
+    val words =
+        listOf(
+                getString(if (circles) R.string.follo_tick_circles_ok else R.string.follo_tick_circles_bad),
+                getString(if (saved) R.string.follo_tick_map_ok else R.string.follo_tick_map_bad),
+                getString(if (latest) R.string.follo_tick_app_ok else R.string.follo_tick_app_bad),
+            )
+            .joinToString(", ")
+    binding.ticks.contentDescription = getString(R.string.follo_ticks_cd, words)
+  }
+
+  /** The position pill: whenever the app has a fix of its own, except while Off or while location can't be used. */
+  private fun renderCoords(b: Banner) {
+    val l = viewModel.currentLocation.value
+    val show = l != null && !FolloPower.isOff && b.kind !in NO_POSITION_KINDS
+    val visibility = if (show) View.VISIBLE else View.GONE
+    if (show && l != null) {
+      val text = FolloRules.coordsText(l.latitude, l.longitude)
+      if (binding.coords.text.toString() != text) {
+        binding.coords.text = text
+        binding.coords.contentDescription = getString(R.string.follo_coords_cd, text)
+        // the map may report from inside a layout pass, where a request for a new width is lost (13 Nov 2026)
+        binding.coords.post { binding.coords.requestLayout() }
+      }
+    }
+    if (binding.coords.visibility != visibility) {
+      binding.coords.visibility = visibility
+      binding.root.post { placeOverlays() }
+    }
+  }
+
+  /** Press and hold the position: the phone's share sheet with "GDA2020 lat, lon (MGA55 E … N …)". */
+  private fun shareCoords() {
+    val l = viewModel.currentLocation.value ?: return
+    share(FolloRules.coordsShare(l.latitude, l.longitude), getString(R.string.follo_coords_share))
+  }
+
+  /** A tap on the ticks: the phone check to share; while the offline map waits for Wi-Fi, its question comes first. */
+  private fun onTicksClicked() {
+    val s = folloOfflineRepo.state.value as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting
+    if (s == null || FolloPower.isOff) {
+      shareCheck()
+      return
+    }
+    MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.follo_offline_ask_title)
+        .setMessage(getString(R.string.follo_offline_ask_msg, s.megabytes))
+        .setPositiveButton(R.string.follo_offline_ask_yes) { _, _ -> folloOfflineRepo.allowMetered() }
+        .setNegativeButton(R.string.follo_offline_ask_no, null)
+        .setNeutralButton(R.string.follo_offline_ask_share) { _, _ -> shareCheck() }
+        .show()
+  }
+
+  private fun shareCheck() {
+    val st = viewModel.folloStatus.value
+    val off = folloOfflineRepo.state.value
+    val maker = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+    val device = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) Build.MODEL else "$maker ${Build.MODEL}"
+    val version =
+        if (BuildConfig.FOLLO_BUILD > 0) "${BuildConfig.VERSION_NAME} (${BuildConfig.FOLLO_BUILD})" else BuildConfig.VERSION_NAME
+    val text =
+        FolloRules.checkText(
+            phone = binding.who.text.toString(),
+            device = device,
+            os = "Android ${Build.VERSION.RELEASE}",
+            statusAtMs = st?.receivedAt ?: 0L,
+            nowMs = System.currentTimeMillis(),
+            zone = java.time.ZoneId.systemDefault(),
+            map =
+                FolloRules.MapCheck(
+                    saved = off is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved,
+                    savingPercent = (off as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving)?.percent,
+                    waitingForWifi = off is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting,
+                ),
+            version = version,
+            versionCode = BuildConfig.VERSION_CODE.toLong(),
+            latestCode = st?.message?.latest?.android,
+            latestVersion = st?.message?.latest?.androidv,
+            circlesDay = wakeUpdate?.replace('-', '.'),
+        )
+    share(text, getString(R.string.follo_check_share))
+  }
+
+  private fun share(text: String, title: String) {
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    try {
+      startActivity(Intent.createChooser(send, title))
+    } catch (e: Exception) {
+      Timber.w(e, "Nothing to share with")
+    }
+  }
+
+  /** The recentre button: while the map is held where it was moved by hand, and there is a map. */
+  private fun showRecentre() {
+    if (!::binding.isInitialized) return
+    val visibility = if (followPaused && !FolloPower.isOff) View.VISIBLE else View.GONE
+    if (binding.recentre.visibility != visibility) binding.recentre.visibility = visibility
   }
 
   private var batterySaverNote = false
@@ -1185,58 +1406,9 @@ class MainActivity :
   /** Base camp's drawings for this phone (12 Nov 2026): just above the search grids, under everything else. */
   private var drawOverlay: FolloDrawOverlay? = null
 
-  /**
-   * The offline map's sign at the end of the card's second line (13 Nov 2026; a line of words until then): green once
-   * saved, red while saving or waiting for Wi-Fi, gone when there is nothing to save.
-   */
-  private fun renderOffline(s: org.owntracks.android.data.repos.FolloOfflineRepo.State) {
-    if (!::binding.isInitialized) return
-    val hidden = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden || !preferences.setupCompleted
-    val visibility = if (hidden) View.GONE else View.VISIBLE
-    if (binding.offlineIcon.visibility != visibility) binding.offlineIcon.visibility = visibility
-    val saved = s is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved
-    binding.offlineIcon.imageTintList =
-        android.content.res.ColorStateList.valueOf(getColor(if (saved) R.color.follo_green else R.color.follo_red))
-  }
-
-  /** The words the sign stands for. */
-  private fun offlineWords(s: org.owntracks.android.data.repos.FolloOfflineRepo.State): String =
-      when (s) {
-        is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving -> getString(R.string.follo_offline_saving, s.percent)
-        is org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting -> getString(R.string.follo_offline_waiting)
-        org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved -> getString(R.string.follo_offline_saved)
-        org.owntracks.android.data.repos.FolloOfflineRepo.State.Hidden -> ""
-      }
-
-  /** Did the finger go down on the offline map's sign (with 14 dp of room round it)? */
-  private fun onOfflineSign(): Boolean {
-    val icon = binding.offlineIcon
-    if (icon.visibility != View.VISIBLE || FolloPower.isOff) return false
-    val r = android.graphics.Rect()
-    icon.getDrawingRect(r)
-    binding.card.offsetDescendantRectToMyCoords(icon, r)
-    val room = (14 * resources.displayMetrics.density).toInt()
-    r.inset(-room, -room)
-    return r.contains(cardDownX.toInt(), cardDownY.toInt())
-  }
-
-  /**
-   * A tap on the offline map's sign: its words for a moment ("Offline map saved", "Saving offline map: 45%"); while
-   * it waits for Wi-Fi, the one question about mobile data, then the download.
-   */
-  private fun onOfflineClicked() {
-    val state = folloOfflineRepo.state.value
-    val s = state as? org.owntracks.android.data.repos.FolloOfflineRepo.State.Waiting
-    if (s == null) {
-      offlineWords(state).takeIf { it.isNotEmpty() }?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
-      return
-    }
-    MaterialAlertDialogBuilder(this)
-        .setTitle(R.string.follo_offline_ask_title)
-        .setMessage(getString(R.string.follo_offline_ask_msg, s.megabytes))
-        .setPositiveButton(R.string.follo_offline_ask_yes) { _, _ -> folloOfflineRepo.allowMetered() }
-        .setNegativeButton(R.string.follo_offline_ask_no, null)
-        .show()
+  /** The offline map's state changed: the second tick (13 Nov 2026 a sign on the card; 14 Nov the tick). */
+  private fun renderOffline(@Suppress("UNUSED_PARAMETER") s: org.owntracks.android.data.repos.FolloOfflineRepo.State) {
+    renderTicks()
   }
 
   private fun isPowerSaveMode(): Boolean =
@@ -1604,12 +1776,21 @@ class MainActivity :
         .destinationPoint((ox / pxPerM).toDouble(), (up - 90f).toDouble())
   }
 
-  /** The part of the map not covered by the status banner and the card, in map-view pixels. */
+  /**
+   * The part of the map the arrow is kept in, in map-view pixels. Upright: between the banner and the card, across the
+   * whole width. Sideways (14 Nov 2026): from under the status bar down to the bottom band, its middle halfway between
+   * the recentre button and the rotate button (both centres), so the arrow sits in the open map left of the panels.
+   */
   private fun visible(): android.graphics.RectF {
-    val sideways = binding.banner.width < map.width * 0.8f // landscape: status column on the left
-    return if (sideways)
-        android.graphics.RectF((binding.banner.right - map.left).toFloat(), 0f, map.width.toFloat(), map.height.toFloat())
-    else {
+    return if (isLand()) {
+      val top = (barsTop - map.top).toFloat().coerceAtLeast(0f)
+      val bottom = (binding.creditBar.top - map.top).toFloat().takeIf { it > top + 1 } ?: map.height.toFloat()
+      val half = dp(20f)
+      val recentreX = recentreStart() + half - map.left
+      val rotateX = map.width - rotateEnd() - half
+      val mid = ((recentreX + rotateX) / 2f).coerceIn(1f, map.width.toFloat())
+      android.graphics.RectF(0f, top, 2 * mid, bottom)
+    } else {
       val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
       // the top of the notice when it is shown, else of the card (both inside `bottom`, under its top padding)
       val bottom = (binding.bottom.top + binding.bottom.paddingTop - map.top).toFloat().takeIf { it > top } ?: map.height.toFloat()
@@ -1794,7 +1975,7 @@ class MainActivity :
       if (pos != null) {
         upBearing = shownHeading
         map.mapOrientation = -shownHeading
-        map.controller.setCenter(headingUpCentre(pos, NAV_DOWN, shownHeading))
+        map.controller.setCenter(headingUpCentre(pos, if (isLand()) LAND_DOWN else NAV_DOWN, shownHeading))
         arrow?.position = pos
         arrow?.rotation = 0f
         shownT = navTimeAt(now)
@@ -1811,14 +1992,14 @@ class MainActivity :
 
   private var centredOnce = false
   /**
-   * True once the volunteer moves, zooms or turns the map themselves; tapping the card or banner brings following
-   * back. While it is true the card says "Recentre" (the whole card is the button, the words only say so).
+   * True once the volunteer moves, zooms or turns the map themselves; the recentre button (or a tap on the banner)
+   * brings following back. While it is true the recentre button shows at the top left (14 Nov 2026).
    */
   private var followPaused = false
     set(value) {
       if (field == value) return
       field = value
-      if (::binding.isInitialized) binding.recentre.visibility = if (value) android.view.View.VISIBLE else android.view.View.GONE
+      showRecentre()
     }
   /** True while a finger is on the map: the camera does not move it under the finger. */
   private var gestureActive = false
@@ -1856,7 +2037,7 @@ class MainActivity :
     map.controller.animateTo(c, null, PAN_MS)
   }
 
-  /** Card or banner tap: follow again, heading-up, at walking scale, with the arrow back on its spot. */
+  /** The recentre button or a banner tap: follow again, heading-up, at walking scale, with the arrow back on its spot. */
   private fun recentre() {
     if (FolloPower.isOff) return // no map to recentre
     followPaused = false
@@ -2344,6 +2525,13 @@ class MainActivity :
     /** Where the dot / arrow sits, as a fraction of the way down the visible map. */
     private const val HEADING_DOWN = 0.75f
     private const val NAV_DOWN = 0.80f
+    /** Sideways (14 Nov 2026): the arrow in the middle of the open map, top to bottom. */
+    private const val LAND_DOWN = 0.5f
+    /** Sideways (Alex 14 Nov 2026): the status panel and the card are this wide; the card is this tall at least. */
+    private const val SIDE_PANEL_DP = 280f
+    private const val LAND_CARD_DP = 80f
+    /** States in which the position pill is not shown: no position may be used or none is coming. */
+    private val NO_POSITION_KINDS = setOf(Kind.NOT_SET_UP, Kind.SETTING_UP, Kind.NEED_LOCATION, Kind.LOCATION_OFF, Kind.NEED_PRECISE, Kind.OFF)
     /** The map's turn eases toward the compass with this time constant (seconds). */
     private const val HEADING_TAU_S = 0.25f
     /** Closer than this to the compass = done turning (no more redraws). */

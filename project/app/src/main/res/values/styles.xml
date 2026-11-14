@@ -103,4 +103,23 @@
     <style name="Theme.Owntracks.AlertDialog" parent="@style/ThemeOverlay.MaterialComponents.MaterialAlertDialog">
         <item name="android:tint">?attr/colorPrimary</item>
     </style>
+    <!-- The ticks at the bottom right (14 Nov 2026): the emoji (✅ or ⚠️), then a small white label -->
+    <style name="FolloTick">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="FolloTickLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">2dp</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:textColor">@color/follo_white</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 </resources>
