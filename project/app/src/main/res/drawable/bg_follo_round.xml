@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The round light button over the map (the rotate button, 14 Nov 2026), with a ripple when pressed -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#331E6B3A">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/follo_card" />
+        </shape>
+    </item>
+</ripple>

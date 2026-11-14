@@ -289,4 +289,21 @@
             android:textColor="#F2FFFFFF"
             android:textSize="11sp" />
     </LinearLayout>
+
+    <!-- The rotate button (wording page tile R, 14 Nov 2026): over the map at the top right, 12 dp under the banner
+         (sideways, under the status bar, clear of the navigation bar). Each tap turns the screen a quarter turn
+         clockwise: 90, 180, 270, then upright again (FolloScreenTurner). MainActivity sets its top and end margins. -->
+    <ImageButton
+        android:id="@+id/rotate"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_follo_round"
+        android:contentDescription="@string/follo_rotate"
+        android:elevation="4dp"
+        android:padding="7dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_follo_rotate" />
 </FrameLayout>

@@ -311,4 +311,18 @@ class FolloRulesTest {
     assertFalse("a rough network fix inside waits for GPS", FolloRules.watchStarts(0.0, 45f))
     assertFalse(FolloRules.watchStarts(3.0, 5f))
   }
+
+  @Test
+  fun `the rotate button turns a quarter at a time, and the fourth tap is upright again`() {
+    var d = 0
+    val seen = mutableListOf<Int>()
+    repeat(4) {
+      d = FolloRules.nextTurn(d)
+      seen += d
+    }
+    assertEquals(listOf(90, 180, 270, 0), seen)
+    assertEquals(90, FolloRules.nextTurn(360))
+    assertEquals(0, FolloRules.nextTurn(-90))
+    assertEquals(180, FolloRules.nextTurn(100))
+  }
 }

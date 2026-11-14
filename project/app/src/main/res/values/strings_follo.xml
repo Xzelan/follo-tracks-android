@@ -95,7 +95,7 @@
     <string name="follo_notif_standby">FOLLO Tracks: standing by</string>
     <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
     <string name="follo_area_label">Search area</string>
-    <string name="follo_shake_hint">Give the phone a gentle shake to turn the screen</string>
+    <string name="follo_rotate">Turn the screen a quarter turn</string>
     <string name="follo_location_howto">Permissions › Location › Allow all the time</string>
     <string name="follo_notif_off_note">Notifications are off — the app still works</string>
     <string name="follo_offline_saving">Saving offline map: %1$d%%</string>

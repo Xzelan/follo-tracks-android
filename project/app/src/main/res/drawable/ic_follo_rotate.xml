@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The rotate button's symbol (wording page v13, 13 Nov 2026): a phone upright at the top left, a phone sideways at the
+     bottom right, and a quarter-turn arrow between them. Drawn in follo_green on the round light button. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp" android:height="26dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="@color/follo_green" android:strokeWidth="1.9"
+        android:strokeLineJoin="round"
+        android:pathData="M3.1,1.6 H5.9 A1.5,1.5 0 0,1 7.4,3.1 V10.1 A1.5,1.5 0 0,1 5.9,11.6 H3.1 A1.5,1.5 0 0,1 1.6,10.1 V3.1 A1.5,1.5 0 0,1 3.1,1.6 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="@color/follo_green" android:strokeWidth="1.9"
+        android:strokeLineJoin="round"
+        android:pathData="M13.9,16.6 H20.9 A1.5,1.5 0 0,1 22.4,18.1 V20.9 A1.5,1.5 0 0,1 20.9,22.4 H13.9 A1.5,1.5 0 0,1 12.4,20.9 V18.1 A1.5,1.5 0 0,1 13.9,16.6 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="@color/follo_green" android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M12,3.4 A6.6,6.6 0 0,1 18.6,10 V12" />
+    <path android:fillColor="#00000000" android:strokeColor="@color/follo_green" android:strokeWidth="2.2"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M15.2,8.8 L18.6,12.2 L22,8.8" />
+</vector>

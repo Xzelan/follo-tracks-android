@@ -110,6 +110,9 @@ class MainActivity :
   private var cardBaseMarginBottom = 0
   /** The navigation bar's height, for the foot of the screen (kept for applyOrientation) */
   private var barsBottom = 0
+  /** The status bar's height and the system bars at the right (sideways), for the rotate button's place */
+  private var barsTop = 0
+  private var barsRight = 0
   /** Where on the card the finger last went down: a tap on the offline map's sign is not a "recentre" */
   private var cardDownX = 0f
   private var cardDownY = 0f
@@ -120,8 +123,8 @@ class MainActivity :
   private var ownDialog: androidx.appcompat.app.AlertDialog? = null
   /** Which way the phone points: turns the map (NAV). */
   private lateinit var compass: FolloCompass
-  /** Portrait / landscape only by tilt + a gentle shake. */
-  private lateinit var shakeTurner: FolloShakeTurner
+  /** Which way the screen is turned: upright on opening, a quarter turn per tap of the rotate button (14 Nov 2026). */
+  private lateinit var screenTurner: FolloScreenTurner
 
   /** What the banner is showing; [kind] decides what the one button does. */
   private data class Banner(
@@ -246,6 +249,9 @@ class MainActivity :
     ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
       val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
       barsBottom = bars.bottom
+      barsTop = bars.top
+      barsRight = bars.right
+      placeRotate()
       binding.banner.updatePadding(top = bannerBasePaddingTop + bars.top)
       applyFoot()
       binding.creditBar.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
@@ -255,9 +261,15 @@ class MainActivity :
     }
 
     compass = FolloCompass(this) { if (camera == Camera.NAV) requestNavFrame() }
-    shakeTurner =
-        FolloShakeTurner(this) { Toast.makeText(this, R.string.follo_shake_hint, Toast.LENGTH_SHORT).show() }
-    shakeTurner.lockCurrent()
+    // Upright every time the app is opened; a turn chosen with the rotate button is kept only while the screen is
+    // being made again (savedInstanceState), not over a fresh open.
+    screenTurner = FolloScreenTurner(this)
+    screenTurner.open(savedInstanceState?.takeIf { it.containsKey(TURN_KEY) }?.getInt(TURN_KEY))
+    binding.rotate.setOnClickListener { screenTurner.turn() }
+    // under the banner, which grows and shrinks with its state
+    binding.banner.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+      if (bottom - top != oldBottom - oldTop) placeRotate()
+    }
     applyOrientation(resources.configuration.orientation)
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
@@ -442,6 +454,31 @@ class MainActivity :
     // the Off words sit in the part of the screen the map shows in: right of the side panel when the phone is sideways
     binding.offCover.updatePadding(left = if (land) resources.getDimensionPixelSize(R.dimen.follo_side_panel) else 0)
     applyFoot()
+    placeRotate()
+  }
+
+  /**
+   * The rotate button: top right of the map, 12 dp in. Upright it hangs 12 dp under the banner (as tall as its state
+   * makes it); sideways the banner is a column down the left, so it sits 12 dp under the status bar, and clear of the
+   * navigation bar when that is on the right.
+   */
+  private fun placeRotate() {
+    if (!::binding.isInitialized) return
+    val land = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val gap = (12 * resources.displayMetrics.density).toInt()
+    val top = gap + if (land) barsTop else binding.banner.height
+    val end = gap + if (land) barsRight else 0
+    binding.rotate.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      if (topMargin != top || marginEnd != end) {
+        topMargin = top
+        marginEnd = end
+      }
+    }
+  }
+
+  override fun onSaveInstanceState(outState: Bundle) {
+    super.onSaveInstanceState(outState)
+    if (::screenTurner.isInitialized) outState.putInt(TURN_KEY, screenTurner.degrees)
   }
 
   /**
@@ -480,7 +517,6 @@ class MainActivity :
     // A system prompt pauses us, so being resumed means it has gone; our own dialogs do not pause us.
     promptInFlight = ownDialog?.isShowing == true
     map.onResume()
-    shakeTurner.start()
     // Power button (13 Nov 2026): Off = the screen comes forward without asking for a position or checking in
     if (!FolloPower.isOff(this)) comeForward()
     render()
@@ -692,7 +728,6 @@ class MainActivity :
 
   override fun onPause() {
     compass.stop()
-    shakeTurner.stop()
     map.onPause()
     super.onPause()
   }
@@ -2318,6 +2353,8 @@ class MainActivity :
     /** ≤ 30 camera redraws a second. */
     private const val FRAME_MIN_MS = 33L
     private const val START_ZOOM = 18.5
+    /** savedInstanceState key: how far the rotate button has turned the screen (0, 90, 180, 270) */
+    private const val TURN_KEY = "follo_turn"
     /** All of Australia, shown until the first fix when the phone has no position at all. */
     private const val OVERVIEW_ZOOM = 4.0
     private const val LABEL_SUFFIX = "-label"

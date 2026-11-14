@@ -73,6 +73,13 @@ object FolloRules {
   /** How far round the button's ring is after [heldMs] (0…1). */
   fun powerProgress(heldMs: Long): Float = (heldMs.toFloat() / POWER_HOLD_MS).coerceIn(0f, 1f)
 
+  /**
+   * The rotate button (Alex 14 Nov 2026: "make sure the rotate button rotates by 90, 180, 270, 360 degrees"): the app
+   * opens upright (0), and each tap turns the screen a further quarter turn clockwise: 90, 180, 270, then upright
+   * again (360 = 0). Anything else given is taken round to the nearest quarter below it first.
+   */
+  fun nextTurn(degrees: Int): Int = (Math.floorMod(degrees, 360) / 90 * 90 + 90) % 360
+
   /** Whether a leader's last fix (epoch seconds) is recent enough to show. */
   fun leaderFresh(lastFixS: Long, nowS: Long): Boolean = nowS - lastFixS <= LEADER_STALE_S
 
