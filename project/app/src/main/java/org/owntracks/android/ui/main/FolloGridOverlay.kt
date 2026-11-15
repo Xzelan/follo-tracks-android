@@ -56,6 +56,8 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
     if (!c.getClipBounds(clip)) return
     for (a in g.areas) {
       if (a.north < view.latSouth || a.south > view.latNorth || a.east < view.lonWest || a.west > view.lonEast) continue
+      // the cells past a U-turn (15 Nov 2026): grey, thin for every team, under all the coloured lines
+      for (t in a.teams) if (t.grey.isNotEmpty()) drawLines(c, p, t.grey, GREY_COLOR, OTHER_DP * density, 255)
       // the phone's own team last, so its bold lines lie over the others where grids meet
       for (t in a.teams) if (!FolloGrid.sameTeam(t.name, ownTeam)) drawTeam(c, p, t, own = false)
       for (t in a.teams) if (FolloGrid.sameTeam(t.name, ownTeam)) drawTeam(c, p, t, own = true)
@@ -68,14 +70,18 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
   }
 
   private fun drawTeam(c: Canvas, p: Projection, t: FolloGrid.Team, own: Boolean) {
-    val width = (if (own) OWN_DP else OTHER_DP) * density
+    drawLines(c, p, t.lines, t.color, (if (own) OWN_DP else OTHER_DP) * density, if (own) 255 else OTHER_ALPHA)
+  }
+
+  /** Lines in one colour over the white casing; pieces wholly off screen are not drawn. */
+  private fun drawLines(c: Canvas, p: Projection, lines: List<DoubleArray>, color: Int, width: Float, alpha: Int) {
     val reach = width + CASING_EXTRA_DP * density
     val left = clip.left - reach
     val right = clip.right + reach
     val top = clip.top - reach
     val bottom = clip.bottom + reach
     var n = 0
-    for (l in t.lines) {
+    for (l in lines) {
       var x0 = p.getLongPixelXFromLongitude(l[1]).toFloat()
       var y0 = p.getLongPixelYFromLatitude(l[0]).toFloat()
       var i = 2
@@ -98,8 +104,8 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
     if (n == 0) return
     casing.strokeWidth = width + CASING_EXTRA_DP * density
     line.strokeWidth = width
-    line.color = t.color
-    line.alpha = if (own) 255 else OTHER_ALPHA
+    line.color = color
+    line.alpha = alpha
     c.drawLines(buf, 0, n, casing)
     c.drawLines(buf, 0, n, line)
   }
@@ -129,6 +135,8 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
     const val CASING_EXTRA_DP = 2f
     const val CASING_ALPHA = 179 // 70 %
     const val OTHER_ALPHA = 217 // 85 %
+    /** The cells past a U-turn (spec 15 Nov 2026): #8E949A, opaque. */
+    const val GREY_COLOR = -0x716b66 // 0xFF8E949A
     const val TAG_ALPHA = 166 // 65 % black
     const val TAG_EDGE_DP = 2f
     const val TAG_TEXT_SP = 12f

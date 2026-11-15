@@ -389,7 +389,8 @@ object FolloRules {
           versionCode >= latestCode -> "$TICK_OK App: $version, the latest"
           else -> "$TICK_WARN App: $version, latest is ${latestVersion ?: latestCode.toString()}"
         }
-    return listOf("FOLLO Tracks check", "Phone: $phone ($device, $os)", circles, offline, app).joinToString("\n")
+    // Same order as the ticks on screen (Alex 15 Nov 2026: "✅app ✅⭕ ✅map")
+    return listOf("FOLLO Tracks check", "Phone: $phone ($device, $os)", app, circles, offline).joinToString("\n")
   }
 
   private fun clock(ms: Long, zone: java.time.ZoneId): String =
@@ -403,16 +404,23 @@ object FolloRules {
   }
 
   // ── The phone's own position (Alex 13 Nov 2026: "Need GDA2020 coordinates somewhere. Long press on them will offer
-  // OS's share option"; 14 Nov: the pill drops the "GDA2020" word, the shared text keeps it) ─────────────────────
+  // OS's share option"; 14 Nov: the pill drops the "GDA2020" word, the shared text keeps it; 15 Nov: the pill shows
+  // MGA "526599 E, 5252393 N" rather than a "-" and decimals) ─────────────────────────────────────────────────
 
-  /** The pill over the map: "-41.123456, 146.654321". */
-  fun coordsText(lat: Double, lon: Double): String =
+  /** Latitude and longitude, 6 decimals: "-41.123456, 146.654321". */
+  fun latLonText(lat: Double, lon: Double): String =
       String.format(java.util.Locale.US, "%.6f, %.6f", lat, lon)
 
-  /** What a long press shares: "GDA2020 -41.123456, 146.654321 (MGA55 E 470982 N 5447480)". */
+  /** The pill over the map: MGA easting and northing to the metre, "526599 E, 5252393 N" (no zone, no separators). */
+  fun coordsText(lat: Double, lon: Double): String {
+    val g = mga(lat, lon)
+    return "${Math.round(g.easting)} E, ${Math.round(g.northing)} N"
+  }
+
+  /** What a long press shares: "MGA55 526599 E, 5252393 N (GDA2020 -42.880600, 147.325700)". */
   fun coordsShare(lat: Double, lon: Double): String {
     val g = mga(lat, lon)
-    return "GDA2020 ${coordsText(lat, lon)} (MGA${g.zone} E ${Math.round(g.easting)} N ${Math.round(g.northing)})"
+    return "MGA${g.zone} ${coordsText(lat, lon)} (GDA2020 ${latLonText(lat, lon)})"
   }
 
   data class Grid(val zone: Int, val easting: Double, val northing: Double)

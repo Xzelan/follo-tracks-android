@@ -12,10 +12,14 @@ import kotlinx.serialization.json.doubleOrNull
  * phone's own team bold, display only). The body of GET /grid (docs/OFFLINE_GRIDS_20261110.md §2):
  * `{"v", "col": {team: "#RRGGBB"}, "areas": {code: {"teams": {team: {"l": [[lat,lon,lat,lon,…],…]}}, "names":
  * [[lat, lon, "Blue 1", "Blue"],…]}}}`. Malformed pieces are skipped, never fatal.
+ *
+ * 15 Nov 2026 (Alex, FOLLO Planner `phones-greyed-cells`): a team may also carry `"g"` = the lattice of grid cells the
+ * walk skips after a U-turn was pulled in (Search Planner `grid_grey`), same encoding as `l`; drawn grey under every
+ * team's lines. A malformed `g` drops only itself.
  */
 class FolloGrid(val v: String, val areas: List<Area>) {
-  /** One team's lines in an area: each a flat lat,lon,lat,lon… array. */
-  class Team(val name: String, val color: Int, val lines: List<DoubleArray>)
+  /** One team's lines in an area: each a flat lat,lon,lat,lon… array; [grey] = the cells past a U-turn. */
+  class Team(val name: String, val color: Int, val lines: List<DoubleArray>, val grey: List<DoubleArray> = emptyList())
 
   /** A grid's name tag at its start. */
   class Name(val lat: Double, val lon: Double, val text: String, val team: String, val color: Int)
@@ -70,8 +74,8 @@ class FolloGrid(val v: String, val areas: List<Area>) {
             var east = -180.0
             val teams =
                 (o["teams"] as? JsonObject)?.mapNotNull { (team, t) ->
-                  val lines =
-                      ((t as? JsonObject)?.get("l") as? JsonArray)?.mapNotNull { l ->
+                  fun flats(key: String): List<DoubleArray>? =
+                      ((t as? JsonObject)?.get(key) as? JsonArray)?.mapNotNull { l ->
                         val flat = (l as? JsonArray)?.map { it.num() ?: return@mapNotNull null } ?: return@mapNotNull null
                         if (flat.size < 4 || flat.size % 2 != 0) return@mapNotNull null
                         for (i in flat.indices step 2) {
@@ -85,7 +89,9 @@ class FolloGrid(val v: String, val areas: List<Area>) {
                         }
                         flat.toDoubleArray()
                       }
-                  if (lines.isNullOrEmpty()) null else Team(team, colourOf(team), lines)
+                  val lines = flats("l").orEmpty()
+                  val grey = flats("g").orEmpty()
+                  if (lines.isEmpty() && grey.isEmpty()) null else Team(team, colourOf(team), lines, grey)
                 }.orEmpty()
             val names =
                 (o["names"] as? JsonArray)?.mapNotNull { n ->

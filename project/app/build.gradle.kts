@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.39" // 14 Nov 2026: screen round 2 (power button on the card, ticks, position pill, sideways panels, rotate button) (0.1.38: compact screen + power button)
+val versionNameValue = "0.1.40" // 15 Nov 2026: MGA position pill, ticks app·ring·map, grey cells past U-turns, full-screen Always step (0.1.39, 14 Nov 2026: screen round 2 (power button on the card, ticks, position pill, sideways panels, rotate button) (0.1.38: compact screen + power button))
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026

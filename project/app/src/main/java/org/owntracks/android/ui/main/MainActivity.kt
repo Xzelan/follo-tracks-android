@@ -247,9 +247,23 @@ class MainActivity :
       barsLeft = bars.left
       navLeft = nav.left
       navRight = nav.right
+      binding.alwaysPage.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       applyOrientation(resources.configuration.orientation)
       windowInsets
     }
+    // The full-screen Always step (15 Nov 2026): its column at most 420 dp wide, centred (sideways too)
+    binding.alwaysPage.addOnLayoutChangeListener { v, l, _, r, _, ol, _, or, _ ->
+      if (r - l != or - ol) {
+        val avail = r - l - v.paddingLeft - v.paddingRight
+        val w = minOf(avail, (ALWAYS_MAX_DP * resources.displayMetrics.density).toInt())
+        val lp = binding.alwaysColumn.layoutParams
+        if (lp.width != w) {
+          lp.width = w
+          binding.root.post { binding.alwaysColumn.layoutParams = lp }
+        }
+      }
+    }
+    binding.alwaysOpen.setOnClickListener { requestBackgroundLocation() }
 
     compass = FolloCompass(this) { if (camera == Camera.NAV) requestNavFrame() }
     // Upright every time the app is opened; a turn chosen with the rotate button is kept only while the screen is
@@ -617,7 +631,6 @@ class MainActivity :
   }
 
   override fun onStop() {
-    remindedBackground = false   // the While Using reminder is once per open
     viewModel.saveTrack()
     unbindService(serviceConnection)
     super.onStop()
@@ -869,6 +882,17 @@ class MainActivity :
           intent.getStringExtra("follo_zoom")?.toDoubleOrNull()?.let { map.controller.setZoom(it) }
           if (camera == Camera.NAV) setNavLook(true)
         }
+    // Debug builds only (15 Nov 2026): hold the map at "lat,lon" [north up] as if moved by hand, to look at the grids
+    // somewhere the emulator's own position is not (no position inside a search circle is ever made up for a check).
+    if (org.owntracks.android.BuildConfig.DEBUG)
+        intent?.getStringExtra("follo_centre")?.split(",")?.mapNotNull { it.trim().toDoubleOrNull() }?.takeIf { it.size == 2 }?.let {
+          followPaused = true
+          showRecentre()
+          intent.getStringExtra("follo_zoom")?.toDoubleOrNull()?.let { z -> map.controller.setZoom(z) }
+          map.mapOrientation = 0f
+          map.controller.setCenter(org.osmdroid.util.GeoPoint(it[0], it[1]))
+          map.invalidate()
+        }
     val uri = intent?.data ?: return
     if (intent.action != Intent.ACTION_VIEW) return
     intent.data = null
@@ -924,12 +948,8 @@ class MainActivity :
         return
       }
       // Still While Using after the one Android prompt (field review 9 Nov 2026: Kellie tracked only with the screen
-      // on): the reminder comes back once every time the app is opened, with the way to Settings. Same on iOS.
-      if (!remindedBackground) {
-        remindedBackground = true
-        showBackgroundReminder()
-        return
-      }
+      // on): the full-screen Always step stays up until it is fixed (15 Nov 2026; it replaced the once-per-open
+      // reminder). Same on iOS.
     }
     if (
         !notificationPermissionRequester.hasPermission() &&
@@ -962,29 +982,6 @@ class MainActivity :
         .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
           promptInFlight = false
           preferences.userDeclinedEnableLocationPermissions = true
-          render()
-        }
-        .show()
-        .also { ownDialog = it }
-  }
-
-  /** Once per app open while location stays While Using (Android shows its own prompt only once). */
-  private var remindedBackground = false
-
-  private fun showBackgroundReminder() {
-    promptInFlight = true
-    render()
-    MaterialAlertDialogBuilder(this)
-        .setTitle(R.string.follo_bg_reminder_title)
-        .setMessage(R.string.follo_bg_reminder_msg)
-        .setPositiveButton(R.string.follo_bg_reminder_open) { _, _ ->
-          promptInFlight = false
-          render()
-          Toast.makeText(this, R.string.follo_location_howto, Toast.LENGTH_LONG).show()
-          openAppSettings()
-        }
-        .setNegativeButton(R.string.follo_disclosure_not_now) { _, _ ->
-          promptInFlight = false
           render()
         }
         .show()
@@ -1224,6 +1221,12 @@ class MainActivity :
     binding.action.visibility = if (b.button == null) View.GONE else View.VISIBLE
     binding.action.text = b.button ?: ""
     binding.action.setTextColor(b.color)
+    // The full-screen Always step (15 Nov 2026): exactly while the banner would say "Set location to Always"
+    val alwaysVisibility = if (b.kind == Kind.NEED_BACKGROUND) View.VISIBLE else View.GONE
+    if (binding.alwaysPage.visibility != alwaysVisibility) {
+      binding.alwaysPage.visibility = alwaysVisibility
+      if (alwaysVisibility == View.VISIBLE) binding.alwaysTitle.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED)
+    }
     // Power button (13 Nov 2026; on the card since 14 Nov): there once the phone is set up
     val powerVisibility = if (b.kind == Kind.NOT_SET_UP) View.GONE else View.VISIBLE
     if (binding.power.visibility != powerVisibility) binding.power.visibility = powerVisibility
@@ -1284,7 +1287,7 @@ class MainActivity :
 
   // ── The ticks at the bottom right and the phone's own position (Alex, 14 Nov 2026) ─────────────────
 
-  /** The three ticks: checked in with FOLLO today, offline map saved, latest app; a warning sign for any that isn't. */
+  /** The three ticks (Alex 15 Nov 2026 order): latest app, checked in with FOLLO today, offline map saved; a warning sign for any that isn't. */
   private fun renderTicks() {
     if (!::binding.isInitialized) return
     val now = System.currentTimeMillis()
@@ -1301,9 +1304,9 @@ class MainActivity :
     tick(binding.tickApp, latest)
     val words =
         listOf(
+                getString(if (latest) R.string.follo_tick_app_ok else R.string.follo_tick_app_bad),
                 getString(if (circles) R.string.follo_tick_circles_ok else R.string.follo_tick_circles_bad),
                 getString(if (saved) R.string.follo_tick_map_ok else R.string.follo_tick_map_bad),
-                getString(if (latest) R.string.follo_tick_app_ok else R.string.follo_tick_app_bad),
             )
             .joinToString(", ")
     binding.ticks.contentDescription = getString(R.string.follo_ticks_cd, words)
@@ -1329,7 +1332,7 @@ class MainActivity :
     }
   }
 
-  /** Press and hold the position: the phone's share sheet with "GDA2020 lat, lon (MGA55 E … N …)". */
+  /** Press and hold the position: the phone's share sheet with "MGA55 526599 E, 5252393 N (GDA2020 lat, lon)". */
   private fun shareCoords() {
     val l = viewModel.currentLocation.value ?: return
     share(FolloRules.coordsShare(l.latitude, l.longitude), getString(R.string.follo_coords_share))
@@ -2531,6 +2534,8 @@ class MainActivity :
     private const val SIDE_PANEL_DP = 280f
     private const val LAND_CARD_DP = 80f
     /** States in which the position pill is not shown: no position may be used or none is coming. */
+    /** The Always step's column at most this wide (spec 15 Nov 2026). */
+    private const val ALWAYS_MAX_DP = 420
     private val NO_POSITION_KINDS = setOf(Kind.NOT_SET_UP, Kind.SETTING_UP, Kind.NEED_LOCATION, Kind.LOCATION_OFF, Kind.NEED_PRECISE, Kind.OFF)
     /** The map's turn eases toward the compass with this time constant (seconds). */
     private const val HEADING_TAU_S = 0.25f

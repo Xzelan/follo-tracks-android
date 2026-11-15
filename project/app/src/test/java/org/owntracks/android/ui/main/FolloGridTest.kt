@@ -44,6 +44,37 @@ class FolloGridTest {
   }
 
   @Test
+  fun `grey cells past a U-turn are read beside the lines, a bad grey never costs the lines`() {
+    // 15 Nov 2026 (FOLLO Planner `phones-greyed-cells`): `g` = the lattice of the cells the walk skips. Made-up points.
+    val g =
+        FolloGrid.parse(
+            """{"v":"9","col":{"Red":"#C0392B","Blue":"#1A6DB5","Green":"#27774A"},"areas":{"ZZ":{"teams":{
+              "Red":{"l":[[-41.5,146.5,-41.5,146.6]],"g":[[-41.6,146.5,-41.6,146.6],[-41.7,146.5],["x",1,2,3],[-41.6,146.4,-41.65,146.45]]},
+              "Blue":{"l":[[-41.5,146.5,-41.4,146.5]],"g":"rubbish"},
+              "Green":{"g":[[-41.8,146.5,-41.8,146.7]]},
+              "Grey only bad":{"g":[[1,2]]}}}}}"""
+        )!!
+    val zz = g.areas.single()
+    assertEquals(listOf("Red", "Blue", "Green"), zz.teams.map { it.name })
+    val red = zz.teams[0]
+    assertEquals(1, red.lines.size)
+    assertEquals(2, red.grey.size) // two good grey lines, two bad ones skipped
+    assertEquals(146.45, red.grey[1][3], 0.0)
+    val blue = zz.teams[1]
+    assertEquals(1, blue.lines.size) // a `g` that is not an array drops only itself
+    assertTrue(blue.grey.isEmpty())
+    val green = zz.teams[2]
+    assertTrue(green.lines.isEmpty()) // a team with grey cells alone is still drawn
+    assertEquals(1, green.grey.size)
+    assertEquals(-41.8, zz.south, 0.0) // the box takes the grey lines in too
+    assertEquals(146.4, zz.west, 0.0)
+    assertEquals(146.7, zz.east, 0.0)
+    assertEquals(2, g.lineCount) // the count is of the walked lines only
+    // an old body without `g` still reads the same
+    assertTrue(FolloGrid.parse(body)!!.areas[0].teams.all { it.grey.isEmpty() })
+  }
+
+  @Test
   fun `no grids and rubbish`() {
     val none = FolloGrid.parse("""{"v":"0","col":{},"areas":{}}""")
     assertEquals("0", none!!.v)

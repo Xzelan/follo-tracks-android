@@ -101,9 +101,6 @@
     <string name="follo_offline_ask_no">Wait for Wi-Fi</string>
     <string name="follo_battery_saver_note">Battery saver is on, so your track will have gaps. Tap here and turn it off for the search</string>
     <string name="follo_battery_saver_howto">Settings › Battery › Battery saver › off</string>
-    <string name="follo_bg_reminder_title">Location is still While Using</string>
-    <string name="follo_bg_reminder_msg">Tracking stops when your screen locks, so the line sees you only while the phone is in your hand. In Settings choose Permissions › Location › Allow all the time.</string>
-    <string name="follo_bg_reminder_open">Open Settings</string>
     <string name="follo_send_now">Sending your position…</string>
     <!-- Screen round 2 (14 Nov 2026): the three ticks at the bottom right and the phone's own position -->
     <string name="follo_tick_map">map</string>
@@ -144,4 +141,10 @@
     <string name="follo_msgs_channel">FOLLO messages</string>
     <string name="follo_msgs_channel_desc">Base camp asking phones to check in during a search</string>
     <string name="follo_checkin_notif_text">Base camp asks you to open FOLLO Tracks</string>
+    <!-- The full-screen Always step (15 Nov 2026) -->
+    <string name="follo_always_title">Set location to Allow all the time</string>
+    <string name="follo_always_body">Location is set to While Using, so FOLLO Tracks stops recording when your screen locks. Your tracklog only counts if it keeps recording with the phone in your pocket.</string>
+    <string name="follo_always_steps">1. Tap Open Settings\n2. Tap Permissions › Location\n3. Choose Allow all the time\n4. Keep Use precise location on</string>
+    <string name="follo_always_btn">Open Settings</string>
+    <string name="follo_always_small">FOLLO only keeps positions during search hours, inside the search area.</string>
 </resources>

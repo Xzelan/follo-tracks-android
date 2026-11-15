@@ -393,9 +393,9 @@ class FolloRulesTest {
     assertEquals(
         "FOLLO Tracks check\n" +
             "Phone: Green-IP · tracker IP (Samsung SM-A145P, Android 14)\n" +
+            "✅ App: 0.1.39, the latest\n" +
             "✅ Circles: checked in today, 9:12 am\n" +
-            "✅ Offline map: on this phone\n" +
-            "✅ App: 0.1.39, the latest",
+            "✅ Offline map: on this phone",
         good,
     )
     val bad =
@@ -410,13 +410,15 @@ class FolloRulesTest {
             FolloRules.MapCheck(saved = true), "0.1.39", 400139000, 400139000, "0.1.39", circlesDay = "9.11.2026")
     assertTrue(dated.contains("✅ Circles: checked in today, 9:12 am (circles of 9.11.2026)"))
     assertTrue(bad.contains("⚠️ Offline map: not on this phone, saving 45%"))
-    assertTrue(bad.endsWith("⚠️ App: 0.1.35, latest is 0.1.39"))
+    // the same order as the ticks on screen (Alex 15 Nov 2026): app, circles, map
+    assertTrue(bad.contains("Android 14)\n⚠️ App: 0.1.35, latest is 0.1.39\n⚠️ Circles:"))
+    assertTrue(bad.endsWith("⚠️ Offline map: not on this phone, saving 45%"))
     val never =
         FolloRules.checkText("FOLLO Tracks", "x", "Android 14", 0L, now, hobart,
             FolloRules.MapCheck(saved = false, waitingForWifi = true), "0.1.39", 400139000, null, null)
     assertTrue(never.contains("⚠️ Circles: never checked in"))
     assertTrue(never.contains("not on this phone, waiting for Wi-Fi"))
-    assertTrue(never.endsWith("✅ App: 0.1.39"))
+    assertTrue(never.contains("\n✅ App: 0.1.39\n"))
   }
 
   @Test
@@ -435,11 +437,24 @@ class FolloRulesTest {
   }
 
   @Test
-  fun `the coordinates pill and its shared text`() {
-    assertEquals("-41.123456, 146.654321", FolloRules.coordsText(-41.123456, 146.654321))
+  fun `the coordinates pill shows MGA easting and northing to the metre`() {
+    // Alex 15 Nov 2026: "526599 E, 5252393 N" rather than a "-" and decimals. Reference values: PROJ cs2cs, UTM on GRS80.
+    assertEquals("526599 E, 5252393 N", FolloRules.coordsText(-42.8806, 147.3257)) // E 526598.627, N 5252392.788
+    assertEquals("485188 E, 5449494 N", FolloRules.coordsText(-41.1057, 146.8236)) // E 485188.212, N 5449494.137
+    assertEquals("500000 E, 6958183 N", FolloRules.coordsText(-27.5, 153.0)) // zone 56: E 500000.000, N 6958183.184
+    assertEquals(56, FolloRules.mga(-27.5, 153.0).zone)
+  }
+
+  @Test
+  fun `a long press shares MGA with the zone, then GDA2020 latitude and longitude`() {
     assertEquals(
-        "GDA2020 -41.123456, 146.654321 (MGA55 E 470982 N 5447480)",
-        FolloRules.coordsShare(-41.123456, 146.654321),
+        "MGA55 526599 E, 5252393 N (GDA2020 -42.880600, 147.325700)",
+        FolloRules.coordsShare(-42.8806, 147.3257),
     )
+    assertEquals(
+        "MGA56 500000 E, 6958183 N (GDA2020 -27.500000, 153.000000)",
+        FolloRules.coordsShare(-27.5, 153.0),
+    )
+    assertEquals("-41.123456, 146.654321", FolloRules.latLonText(-41.123456, 146.654321))
   }
 }

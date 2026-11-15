@@ -143,9 +143,19 @@
             android:paddingStart="4dp"
             android:paddingEnd="4dp">
 
+            <!-- Order (Alex 15 Nov 2026): "✅app ✅⭕ ✅map" -->
+            <TextView
+                android:id="@+id/tickApp"
+                style="@style/FolloTick" />
+
+            <TextView
+                style="@style/FolloTickLabel"
+                android:text="@string/follo_tick_app" />
+
             <TextView
                 android:id="@+id/tickCircles"
-                style="@style/FolloTick" />
+                style="@style/FolloTick"
+                android:layout_marginStart="7dp" />
 
             <ImageView
                 android:layout_width="11dp"
@@ -162,15 +172,6 @@
             <TextView
                 style="@style/FolloTickLabel"
                 android:text="@string/follo_tick_map" />
-
-            <TextView
-                android:id="@+id/tickApp"
-                style="@style/FolloTick"
-                android:layout_marginStart="7dp" />
-
-            <TextView
-                style="@style/FolloTickLabel"
-                android:text="@string/follo_tick_app" />
         </LinearLayout>
     </LinearLayout>
 
@@ -326,4 +327,88 @@
         android:padding="7dp"
         android:scaleType="fitCenter"
         android:src="@drawable/ic_follo_rotate" />
+
+    <!-- The full-screen "Always" step (Alex 15 Nov 2026, FOLLO Planner `tracks-while-using-block`, field review bug 5:
+         the red banner alone was ignored). Shown while location is only While Using (Android 10+), over everything (raised above the panels' elevation); it
+         can't be dismissed and goes by itself once location is Allow all the time. Recording is not changed. Insets
+         are added as padding in MainActivity; the column is at most 420 dp wide, centred, and scrolls sideways. -->
+    <ScrollView
+        android:id="@+id/alwaysPage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/follo_red"
+        android:clickable="true"
+        android:elevation="64dp"
+        android:outlineProvider="none"
+        android:fillViewport="true"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:id="@+id/alwaysColumn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:orientation="vertical"
+                android:paddingStart="28dp"
+                android:paddingTop="24dp"
+                android:paddingEnd="28dp"
+                android:paddingBottom="24dp">
+
+                <TextView
+                    android:id="@+id/alwaysTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityHeading="true"
+                    android:text="@string/follo_always_title"
+                    android:textColor="@color/follo_white"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:lineSpacingMultiplier="1.15"
+                    android:text="@string/follo_always_body"
+                    android:textColor="@color/follo_white"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:lineSpacingMultiplier="1.3"
+                    android:text="@string/follo_always_steps"
+                    android:textColor="@color/follo_white"
+                    android:textSize="17sp" />
+
+                <Button
+                    android:id="@+id/alwaysOpen"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="28dp"
+                    android:backgroundTint="@color/follo_white"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="@string/follo_always_btn"
+                    android:textAllCaps="false"
+                    android:textColor="@color/follo_red"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/follo_always_small"
+                    android:textColor="#D9FFFFFF"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </FrameLayout>
+    </ScrollView>
 </FrameLayout>
