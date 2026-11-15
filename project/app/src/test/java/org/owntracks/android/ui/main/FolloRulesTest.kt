@@ -148,6 +148,49 @@ class FolloRulesTest {
     assertEquals(FolloRules.CheckInAction.NOTHING, FolloRules.checkInAction(false, secondStep = true))
   }
 
+  // ── Check in whatever the GPS does (Alex, 15 Nov 2026) ─────────────────────────────────────
+
+  @Test
+  fun `a check-in fix must be under 100 m and under a minute old`() {
+    assertTrue(FolloRules.usableCheckInFix(true, 12f, 2_000L))
+    assertTrue(FolloRules.usableCheckInFix(true, 99.9f, 60_000L))
+    assertFalse(FolloRules.usableCheckInFix(true, 100f, 1_000L)) // FOLLO-L's cached fused fix was exactly 100 m
+    assertFalse(FolloRules.usableCheckInFix(false, 5f, 1_000L))
+    assertFalse(FolloRules.usableCheckInFix(true, 1.2f, 7L * 24 * 3_600_000)) // a 7-day-old GPS fix, however good
+  }
+
+  @Test
+  fun `the hello goes without a fix after 15 s, well inside the 90 s base camp waits for`() {
+    assertEquals(15_000L, FolloRules.NO_FIX_HELLO_AFTER_MS)
+  }
+
+  @Test
+  fun `a fix that comes after the no-fix hello waits for the reply, or is judged at once once it is in`() {
+    assertEquals(FolloRules.LateFix.KEEP_FOR_REPLY, FolloRules.lateFix(replyPending = true))
+    assertEquals(FolloRules.LateFix.JUDGE_NOW, FolloRules.lateFix(replyPending = false))
+    // judged now = the second step: inside posts, outside sends nothing (never a second hello)
+    assertEquals(FolloRules.CheckInAction.NOTHING, FolloRules.checkInAction(false, secondStep = true))
+  }
+
+  @Test
+  fun `one open check-in per 10 s, but one made before location was allowed doesn't hold back the next`() {
+    assertFalse(FolloRules.openCheckInDue(3_000L, lastHadLocation = true, hasLocation = true))
+    assertTrue(FolloRules.openCheckInDue(10_000L, lastHadLocation = true, hasLocation = true))
+    assertTrue(FolloRules.openCheckInDue(3_000L, lastHadLocation = false, hasLocation = true))
+    assertFalse(FolloRules.openCheckInDue(3_000L, lastHadLocation = false, hasLocation = false))
+    assertFalse(FolloRules.openCheckInDue(3_000L, lastHadLocation = true, hasLocation = false))
+  }
+
+  @Test
+  fun `a fix over 5 minutes old is stale, so is no fix at all`() {
+    assertFalse(FolloRules.fixIsStale(0L))
+    assertFalse(FolloRules.fixIsStale(5 * 60_000L))
+    assertTrue(FolloRules.fixIsStale(5 * 60_000L + 1))
+    assertTrue(FolloRules.fixIsStale(7L * 24 * 3_600_000))
+    assertTrue(FolloRules.fixIsStale(null))
+    assertFalse(FolloRules.fixIsStale(-30_000L)) // a fix from the future (clock change) counts as fresh
+  }
+
   @Test
   fun `only FOLLO wake circles with a radius are judged, markers are not`() {
     assertTrue(FolloRules.isWakeCircle("FOLLO MV wake 3 2026-11-01", 150))

@@ -308,6 +308,44 @@ object FolloRules {
         else -> CheckInAction.HELLO
       }
 
+  // ── Check in whatever the GPS does (Alex, 15 Nov 2026: "it should be able to get to the latest version regardless
+  // of the GPS situation"). FOLLO-L, indoors with no fix, never checked in: every automatic check-in waited for a fix
+  // under 100 m before anything left, even the location-free hello that carries the version and fetches the circles.
+
+  /** How long an automatic check-in (open, push, token) waits for a usable fix before the location-free hello goes. */
+  const val NO_FIX_HELLO_AFTER_MS = 15_000L
+  /** A check-in fix must be better than this… */
+  const val CHECK_IN_FIX_MAX_ACC_M = 100f
+  /** …and no older than this (a cached fix from hours or days ago is not where the phone is). */
+  const val CHECK_IN_FIX_MAX_AGE_MS = 60_000L
+
+  /** Whether a fix may be used by an automatic check-in. */
+  fun usableCheckInFix(hasAccuracy: Boolean, accM: Float, ageMs: Long): Boolean =
+      hasAccuracy && accM < CHECK_IN_FIX_MAX_ACC_M && ageMs <= CHECK_IN_FIX_MAX_AGE_MS
+
+  /** A usable fix that arrives after the no-fix hello went. */
+  enum class LateFix {
+    /** the hello's reply is still on its way: the fix waits for it and is judged once the new circles are in */
+    KEEP_FOR_REPLY,
+    /** the reply has been applied: judged now as the second step (inside → the position goes, outside → nothing) */
+    JUDGE_NOW,
+  }
+
+  fun lateFix(replyPending: Boolean): LateFix = if (replyPending) LateFix.KEEP_FOR_REPLY else LateFix.JUDGE_NOW
+
+  /** One automatic check-in per [OPEN_CHECK_IN_DEDUPE_MS], except that one made before location was allowed doesn't
+   *  hold back the first one after (that one can take a fix). */
+  const val OPEN_CHECK_IN_DEDUPE_MS = 10_000L
+
+  fun openCheckInDue(sinceLastMs: Long, lastHadLocation: Boolean, hasLocation: Boolean): Boolean =
+      sinceLastMs >= OPEN_CHECK_IN_DEDUPE_MS || (hasLocation && !lastHadLocation)
+
+  /** The screen's own fix is older than this: not shown as "your position" (FOLLO-L showed a 7-day-old Tasmanian fix). */
+  const val STALE_FIX_MS = 5 * 60_000L
+
+  /** [ageMs] null = no fix at all. A fix from the future (clock change) counts as fresh. */
+  fun fixIsStale(ageMs: Long?): Boolean = ageMs == null || ageMs > STALE_FIX_MS
+
   // ── Screen, round 2 (Alex, 14 Nov 2026; wording page version 21) ────────────────────────────────
 
   /** A local clock time, short: 6:00 → "6am", 18:30 → "6:30pm". */

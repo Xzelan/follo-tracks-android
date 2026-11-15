@@ -44,6 +44,7 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
@@ -402,6 +403,13 @@ class MainActivity :
           }
         }
         launch { viewModel.lastPublished.collect { render() } }
+        // A fix ages without any event: look every 15 s whether it has just gone stale (15 Nov 2026)
+        launch {
+          while (true) {
+            delay(15_000L)
+            if (FolloRules.fixIsStale(fixAgeMs()) != shownStale) render()
+          }
+        }
         launch { folloOfflineRepo.state.collect { renderOffline(it) } }
         launch {
           folloGridRepo.grid.collect {
@@ -659,11 +667,9 @@ class MainActivity :
     folloGridRepo.refresh()
     folloDrawRepo.refresh() // base camp's drawings for this phone (12 Nov 2026)
     // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
-    // circles for any search in the next 14 days. Sent once the screen has a fix better than 100 m.
-    if (preferences.setupCompleted && requirementsChecker.hasLocationPermissions()) {
-      pendingCheckIn = PendingCheckIn.OPEN
-      checkInIfReady()
-    }
+    // circles for any search in the next 14 days. Since 15 Nov 2026 the service takes the fix itself and sends the
+    // location-free hello anyway when none comes (or location can't be used): no waiting for the screen's fix here.
+    if (preferences.setupCompleted) openCheckIn()
   }
 
   // ── Power button (Alex, 13 Nov 2026; support/FolloPower) ──────────────────────────────────────────
@@ -707,11 +713,10 @@ class MainActivity :
     render()
   }
 
-  /** A check-in (open or long-press) waiting for a usable fix; the app's own 100 m filter would drop a worse one. */
-  /** A check-in waiting for a good enough fix: USER = the person's long-press (sent as is), OPEN = automatic (judged). */
+  /** A check-in waiting for a good enough fix: USER = the person's long-press (sent as is). The automatic (open)
+   *  check-in no longer waits here (15 Nov 2026): BackgroundService.folloCheckIn takes its own fix or goes without. */
   private enum class PendingCheckIn {
     USER,
-    OPEN,
   }
 
   private var pendingCheckIn: PendingCheckIn? = null
@@ -724,7 +729,6 @@ class MainActivity :
     pendingCheckIn = null
     when (kind) {
       PendingCheckIn.USER -> startService(this, BackgroundService.INTENT_ACTION_SEND_LOCATION_USER)
-      PendingCheckIn.OPEN -> openCheckIn()
     }
   }
 
@@ -736,10 +740,13 @@ class MainActivity :
   private fun openCheckIn() {
     if (FolloPower.isOff) return
     // Coming to the front and the permission chain's "granted" callback both land here within a second of each
-    // other (Samsung test 1 Nov 2026: two hellos per open); one automatic check-in per 10 s is plenty.
+    // other (Samsung test 1 Nov 2026: two hellos per open); one automatic check-in per 10 s is plenty, except that one
+    // made before location was allowed (a hello without a fix) doesn't hold back the first one after.
     val now = SystemClock.elapsedRealtime()
-    if (now - lastOpenCheckInAt < OPEN_CHECK_IN_DEDUPE_MS) return
+    val located = requirementsChecker.hasLocationPermissions()
+    if (!FolloRules.openCheckInDue(now - lastOpenCheckInAt, lastOpenCheckInLocated, located)) return
     lastOpenCheckInAt = now
+    lastOpenCheckInLocated = located
     startService(
         this,
         BackgroundService.INTENT_ACTION_FOLLO_CHECKIN,
@@ -748,6 +755,7 @@ class MainActivity :
   }
 
   private var lastOpenCheckInAt = -OPEN_CHECK_IN_DEDUPE_MS
+  private var lastOpenCheckInLocated = false
 
   /** The searches whose wake-up circles this phone holds ("FOLLO MV wake 3" -> MV), for "Ready for MV" (Alex 25 Oct 2026). */
   private var wakeAreas: List<String> = emptyList()
@@ -1312,10 +1320,36 @@ class MainActivity :
     binding.ticks.contentDescription = getString(R.string.follo_ticks_cd, words)
   }
 
-  /** The position pill: whenever the app has a fix of its own, except while Off or while location can't be used. */
+  /** How old the screen's newest fix is (null = none). */
+  private fun fixAgeMs(): Long? = viewModel.currentLocation.value?.let { System.currentTimeMillis() - it.time }
+
+  /** What the arrow last showed: true = grey (the fix is stale), null = nothing yet. */
+  private var shownStale: Boolean? = null
+
+  private fun navArrowIcon(stale: Boolean) = if (stale) R.drawable.ic_follo_nav_arrow_stale else R.drawable.ic_follo_nav_arrow
+
+  /**
+   * A fix more than 5 minutes old is where the phone last was, not where it is (15 Nov 2026: FOLLO-L, indoors, showed a
+   * 7-day-old Tasmanian fix as "your position", and a long press would have shared it): the arrow turns grey and the
+   * position pill goes (renderCoords), both back as soon as a fresh fix comes.
+   */
+  private fun renderStale(): Boolean {
+    val stale = FolloRules.fixIsStale(fixAgeMs())
+    if (shownStale != stale) {
+      shownStale = stale
+      navArrow?.let {
+        it.icon = ResourcesCompat.getDrawable(resources, navArrowIcon(stale), null)
+        map.invalidate()
+      }
+    }
+    return stale
+  }
+
+  /** The position pill: whenever the app has a fresh fix of its own, except while Off or while location can't be used. */
   private fun renderCoords(b: Banner) {
     val l = viewModel.currentLocation.value
-    val show = l != null && !FolloPower.isOff && b.kind !in NO_POSITION_KINDS
+    val stale = renderStale()
+    val show = l != null && !stale && !FolloPower.isOff && b.kind !in NO_POSITION_KINDS
     val visibility = if (show) View.VISIBLE else View.GONE
     if (show && l != null) {
       val text = FolloRules.coordsText(l.latitude, l.longitude)
@@ -1335,6 +1369,7 @@ class MainActivity :
   /** Press and hold the position: the phone's share sheet with "MGA55 526599 E, 5252393 N (GDA2020 lat, lon)". */
   private fun shareCoords() {
     val l = viewModel.currentLocation.value ?: return
+    if (FolloRules.fixIsStale(fixAgeMs())) return // never share where the phone last was as where it is
     share(FolloRules.coordsShare(l.latitude, l.longitude), getString(R.string.follo_coords_share))
   }
 
@@ -1816,7 +1851,7 @@ class MainActivity :
           navArrow =
               Marker(map).apply {
                 id = "nav-arrow"
-                icon = ResourcesCompat.getDrawable(resources, R.drawable.ic_follo_nav_arrow, null)
+                icon = ResourcesCompat.getDrawable(resources, navArrowIcon(shownStale == true), null)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 infoWindow = null
               }
@@ -2511,7 +2546,7 @@ class MainActivity :
     // A check-in goes with a fix better than this (the app's own ignoreInaccurateLocations is 100) and no older than this
     private const val CHECK_IN_MAX_ACC_M = 100f
     private const val CHECK_IN_MAX_AGE_MS = 60_000L
-    private const val OPEN_CHECK_IN_DEDUPE_MS = 10_000L
+    private const val OPEN_CHECK_IN_DEDUPE_MS = FolloRules.OPEN_CHECK_IN_DEDUPE_MS
     private const val PAIR_M = 20.0
     private const val PAIR_TOL_M = 1.0
     private const val NO_SIGNAL_AFTER_MS = 10_000L

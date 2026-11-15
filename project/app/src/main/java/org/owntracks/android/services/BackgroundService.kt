@@ -38,6 +38,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.components.SingletonComponent
 import java.time.Duration
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.stream.Collectors
 import javax.inject.Inject
 import javax.inject.Named
@@ -766,18 +767,23 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   /**
    * FOLLO push "check in" (29 Oct 2026): base camp asked this phone to check in, or its push token
    * is new. Listens for fixes (high accuracy, every second) for up to [FOLLO_CHECKIN_LISTEN] and
-   * posts the FIRST one under [FOLLO_CHECKIN_MAX_ACC_M] as report type "user" (the one report a
-   * standing-by phone may make; LocationProcessor.onCheckInLocation skips the rules that drop a
-   * network fix). A worse fix is waited out, not posted. Nothing good within
-   * [FOLLO_CHECKIN_FALLBACK] => the "open FOLLO Tracks" notification, while still listening; a fix
-   * that then arrives is posted and the notification taken down. (Field test 29 Oct 2026: a 30 s
-   * single request gave up before the GPS fix came on one Samsung and lost a 15-20 m network fix on
-   * the other.)
+   * hands the FIRST usable one (under 100 m, under a minute old: FolloRules.usableCheckInFix) on as
+   * report type "user" (the one report a standing-by phone may make; LocationProcessor
+   * .onCheckInLocation skips the rules that drop a network fix). A worse fix is waited out, not
+   * posted. (Field test 29 Oct 2026: a 30 s single request gave up before the GPS fix came on one
+   * Samsung and lost a 15-20 m network fix on the other.)
    *
    * "No fix on open" (Alex, 1 Nov 2026): the fix is handed to LocationProcessor.onCheckInLocation
    * with its [src], which posts it only when the phone is inside a held circle or boundary and a
-   * location-free hello otherwise; [secondStep] = the judgement after a hello's reply. The "open
-   * FOLLO Tracks" fallback notification is only for base camp's asks (push, token), as before.
+   * location-free hello otherwise; [secondStep] = the judgement after a hello's reply.
+   *
+   * Whatever the GPS does (Alex, 15 Nov 2026: FOLLO-L, indoors with no fix, never checked in and
+   * stayed on its old version): no usable fix within FolloRules.NO_FIX_HELLO_AFTER_MS, or no
+   * location permission at all => the location-free hello goes anyway (version, push token, base
+   * camp's ask answered; the reply brings the circles). Listening goes on: a fix that then comes is
+   * judged as the second step (inside => the position goes, outside => nothing more; never a second
+   * hello). The "open FOLLO Tracks" notification for base camp's asks (push, token) is now only for
+   * when nothing at all could be sent (Off, or the hello could not be queued).
    */
   private fun folloCheckIn(src: LocationProcessor.CheckInSource, secondStep: Boolean = false) {
     val notify = src != LocationProcessor.CheckInSource.OPEN && !secondStep
@@ -787,29 +793,38 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       return
     }
     if (!requirementsChecker.hasLocationPermissions()) {
-      if (notify) FolloCheckInNotification.show(this, null)
+      // No location at all: the hello still goes (it carries no position), so the version and circles get through
+      val sent = !secondStep && locationProcessor.onCheckInWithoutFix(src)
+      if (notify && !sent) FolloCheckInNotification.show(this, null)
       return
     }
     folloCheckInCallback?.let { locationProviderClient.removeLocationUpdates(it) }
-    var done = false
+    // done: a usable fix was taken (or the listen ended); helloSent: the hello went without a fix
+    val done = AtomicBoolean(false)
+    val helloSent = AtomicBoolean(false)
     val startedAt = SystemClock.elapsedRealtime()
     lateinit var callback: LocationCallback
     callback =
         object : LocationCallback {
           override fun onLocationResult(locationResult: LocationResult) {
-            if (done) return
+            if (done.get()) return
             val l = locationResult.lastLocation
-            if (!l.hasAccuracy() || l.accuracy >= FOLLO_CHECKIN_MAX_ACC_M) {
+            val ageMs = System.currentTimeMillis() - l.time
+            if (!FolloRules.usableCheckInFix(l.hasAccuracy(), l.accuracy, ageMs)) {
               Timber.i(
-                  "check-in: fix of ${l.accuracy.toInt()} m (${l.provider}), waiting for a better one"
+                  "check-in: fix of ${l.accuracy.toInt()} m (${l.provider}, ${ageMs / 1000} s old), waiting for a better one"
               )
               return
             }
-            done = true
+            if (!done.compareAndSet(false, true)) return
             lifecycleScope.launch {
-              val posted = locationProcessor.onCheckInLocation(l, src, secondStep)
+              // read on the main thread, where the no-fix hello is sent: no race with it
+              val afterHello = helloSent.get()
+              val posted =
+                  if (afterHello) locationProcessor.onCheckInFixAfterHello(l, src)
+                  else locationProcessor.onCheckInLocation(l, src, secondStep)
               Timber.i(
-                  "check-in (${src.wire}): ${l.accuracy.toInt()} m ${l.provider} fix after ${(SystemClock.elapsedRealtime() - startedAt) / 1000} s, sent=$posted"
+                  "check-in (${src.wire}${if (afterHello) ", after the no-fix hello" else ""}): ${l.accuracy.toInt()} m ${l.provider} fix after ${(SystemClock.elapsedRealtime() - startedAt) / 1000} s, sent=$posted"
               )
               if (posted && notify) FolloCheckInNotification.cancel(this@BackgroundService)
               stopFolloCheckIn(callback)
@@ -836,17 +851,21 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         runThingsOnOtherThreads.getBackgroundLooper(),
     )
     lifecycleScope.launch {
-      delay(FOLLO_CHECKIN_FALLBACK)
-      if (!done && notify) {
-        Timber.w(
-            "check-in: no fix under ${FOLLO_CHECKIN_MAX_ACC_M.toInt()} m within $FOLLO_CHECKIN_FALLBACK, asking the person to open the app"
-        )
+      if (!secondStep) {
+        delay(FolloRules.NO_FIX_HELLO_AFTER_MS)
+        // still this check-in's turn (a newer one replaces the listener and sends its own hello) and no fix yet
+        if (!done.get() && folloCheckInCallback === callback) {
+          helloSent.set(locationProcessor.onCheckInWithoutFix(src))
+        }
+      }
+      delay(FOLLO_CHECKIN_FALLBACK.inWholeMilliseconds - (SystemClock.elapsedRealtime() - startedAt))
+      if (!done.get() && notify && !helloSent.get() && folloCheckInCallback === callback) {
+        Timber.w("check-in: nothing could be sent within $FOLLO_CHECKIN_FALLBACK, asking the person to open the app")
         FolloCheckInNotification.show(this@BackgroundService, null)
       }
-      delay(FOLLO_CHECKIN_LISTEN - FOLLO_CHECKIN_FALLBACK)
-      if (!done) {
-        done = true
-        Timber.w("check-in: giving up after $FOLLO_CHECKIN_LISTEN")
+      delay(FOLLO_CHECKIN_LISTEN.inWholeMilliseconds - (SystemClock.elapsedRealtime() - startedAt))
+      if (done.compareAndSet(false, true)) {
+        Timber.w("check-in: no usable fix after $FOLLO_CHECKIN_LISTEN${if (helloSent.get()) " (the hello went without one)" else ""}")
         stopFolloCheckIn(callback)
       }
     }
@@ -1166,7 +1185,6 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     const val EXTRA_WAKE_PV = "pv"
     private val FOLLO_CHECKIN_FALLBACK = 90.seconds
     private val FOLLO_CHECKIN_LISTEN = 180.seconds
-    private const val FOLLO_CHECKIN_MAX_ACC_M = 100f
     private const val INTENT_ACTION_RESTART_AFTER_TASK_REMOVED =
         "org.owntracks.android.RESTART_AFTER_TASK_REMOVED"
     private const val INTENT_ACTION_BOOT_COMPLETED = "android.intent.action.BOOT_COMPLETED"

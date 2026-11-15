@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The nav arrow (ic_follo_nav_arrow) in grey: the phone's newest fix is more than 5 minutes old, so the arrow shows
+     where the phone LAST was, not where it is (15 Nov 2026: FOLLO-L showed a 7-day-old Tasmanian fix as if current).
+     Same shape and white edge; grey #8E949A as the grey grid cells. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="38dp"
+    android:height="38dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="7.2"
+        android:strokeLineJoin="round"
+        android:pathData="M24,4L8.5,44L24,34.91L39.5,44Z" />
+    <path
+        android:fillColor="#8E949A"
+        android:strokeColor="#8E949A"
+        android:strokeWidth="4"
+        android:strokeLineJoin="round"
+        android:pathData="M24,4L8.5,44L24,34.91L39.5,44Z" />
+</vector>

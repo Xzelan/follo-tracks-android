@@ -183,10 +183,12 @@ constructor(
     OUT("out"),
   }
 
-  private class PendingHello(val location: Location, val src: CheckInSource)
+  /** [location] null = the hello went without a fix (none came in time, 15 Nov 2026). */
+  private class PendingHello(val location: Location?, val src: CheckInSource)
 
   /** The fix a hello was sent for, kept for the second judgement after the reply. */
   @Volatile private var pendingHello: PendingHello? = null
+  private val pendingHelloLock = Any()
 
   /** The second judgement needs a fresh fix (the hello's is older than a minute); BackgroundService listens. */
   private val mutableSecondStepFixRequests = MutableSharedFlow<CheckInSource>(extraBufferCapacity = 4)
@@ -323,7 +325,7 @@ constructor(
    */
   fun onPowerOff(announce: Boolean) {
     dropHeld()
-    pendingHello = null
+    synchronized(pendingHelloLock) { pendingHello = null }
     if (announce && preferences.setupCompleted) queueOffHello(FolloRules.POWER_OFF_HELLO_SRC)
   }
 
@@ -353,15 +355,7 @@ constructor(
       }
       FolloRules.CheckInAction.HELLO -> {
         Timber.i("check-in (${src.wire}): outside the search or nothing held, sending a hello instead of the position")
-        pendingHello = PendingHello(location, src)
-        messageProcessor.queueMessageForSending(
-            MessageHello(
-                src = src.wire,
-                m = preferences.monitoring.value,
-                tid = preferences.tid.toString(),
-                fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
-            ),
-        )
+        queueHello(src, location)
         true
       }
       FolloRules.CheckInAction.NOTHING -> {
@@ -372,21 +366,74 @@ constructor(
   }
 
   /**
+   * No usable fix came in time, or location can't be used at all (Alex, 15 Nov 2026: "it should be able to get to the
+   * latest version regardless of the GPS situation"): the location-free hello goes anyway, so base camp hears from the
+   * phone (its version, its push token, its ask answered) and the reply brings the circles, windows and status. A fix
+   * that comes later is judged as the second step (onCheckInFixAfterHello / onHelloAnswered). Returns true when the
+   * hello was queued.
+   */
+  fun onCheckInWithoutFix(src: CheckInSource): Boolean {
+    if (FolloPower.isOff) return false
+    Timber.i("check-in (${src.wire}): no usable fix in time, sending the hello without one")
+    queueHello(src, null)
+    return true
+  }
+
+  /**
+   * A usable fix that arrived after the no-fix hello went: kept for the reply's judgement while the reply is still on
+   * its way (the new circles must be in first), judged now as the second step once it has been applied. Never sends a
+   * second hello. Returns true when the position was posted now.
+   */
+  suspend fun onCheckInFixAfterHello(location: Location, src: CheckInSource): Boolean {
+    val kept =
+        synchronized(pendingHelloLock) {
+          val pending = pendingHello
+          when (FolloRules.lateFix(replyPending = pending != null && pending.location == null)) {
+            FolloRules.LateFix.KEEP_FOR_REPLY -> {
+              pendingHello = PendingHello(location, pending!!.src)
+              true
+            }
+            FolloRules.LateFix.JUDGE_NOW -> false
+          }
+        }
+    if (kept) {
+      Timber.i("check-in (${src.wire}): fix came after the hello, judged once its reply is in")
+      return false
+    }
+    return onCheckInLocation(location, src, secondStep = true)
+  }
+
+  private fun queueHello(src: CheckInSource, location: Location?) {
+    synchronized(pendingHelloLock) { pendingHello = PendingHello(location, src) }
+    messageProcessor.queueMessageForSending(
+        MessageHello(
+            src = src.wire,
+            m = preferences.monitoring.value,
+            tid = preferences.tid.toString(),
+            fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+        ),
+    )
+  }
+
+  /**
    * The reply to a hello has been applied (MessageProcessor, after its setWaypoints / status). Judge
-   * the hello's fix again if it is still under a minute old, else ask the service for a fresh one.
+   * the hello's fix again if it is still under a minute old, else ask the service for a fresh one
+   * (also when the hello went without a fix).
    */
   fun onHelloAnswered() {
-    if (FolloPower.isOff) {
-      pendingHello = null
-      return
-    }
-    val pending = pendingHello ?: return
-    pendingHello = null
+    val pending =
+        synchronized(pendingHelloLock) {
+          val p = pendingHello
+          pendingHello = null
+          p
+        }
+    if (FolloPower.isOff || pending == null) return
     scope.launch {
-      if (System.currentTimeMillis() - pending.location.time <= CHECK_IN_FIX_MAX_AGE_MS) {
-        onCheckInLocation(pending.location, pending.src, secondStep = true)
+      val fix = pending.location
+      if (fix != null && System.currentTimeMillis() - fix.time <= CHECK_IN_FIX_MAX_AGE_MS) {
+        onCheckInLocation(fix, pending.src, secondStep = true)
       } else {
-        Timber.i("check-in (${pending.src.wire}): hello's fix too old for the 2nd step, asking for a fresh one")
+        Timber.i("check-in (${pending.src.wire}): no fix fresh enough for the 2nd step, asking for a fresh one")
         mutableSecondStepFixRequests.emit(pending.src)
       }
     }
