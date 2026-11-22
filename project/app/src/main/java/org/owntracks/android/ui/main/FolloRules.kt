@@ -381,6 +381,47 @@ object FolloRules {
 
   const val TICK_OK = "✅"
   const val TICK_WARN = "⚠️"
+  /** Partial / in progress (FP083, Alex 22 Nov 2026): U+1F504 exactly; he chose it over the clockwise 🔃. */
+  const val TICK_PART = "\uD83D\uDD04"
+
+  // ── Three states for each tick (FP083, Alex 22 Nov 2026: "The current warning sign if there's something wrong, …
+  // if it's gone cold … and the current green if everything is good"; then widened to partial / in progress for all
+  // three ticks). Contract: FOLLO_tracks/docs/NEXT_BUILD_SPEC_20261122.md §C.
+  enum class Tick(val sign: String) {
+    OK(TICK_OK),
+    PART(TICK_PART),
+    WARN(TICK_WARN),
+  }
+
+  /** An older build stays "in progress" this long after the newer one came out: the store may not have offered it yet. */
+  const val LATEST_GRACE_S = 48 * 3600L
+
+  /**
+   * The app tick: this build is the newest (or none is known) ⇒ good; older while the newer one came out under
+   * [LATEST_GRACE_S] ago (status `latest.aat`) ⇒ partial; older for longer, or no stamp ⇒ wrong.
+   */
+  fun appTick(ownCode: Long, latestCode: Long?, latestAtS: Long?, nowS: Long): Tick =
+      when {
+        isLatest(ownCode, latestCode) -> Tick.OK
+        latestAtS != null && latestAtS > 0L && nowS - latestAtS < LATEST_GRACE_S -> Tick.PART
+        else -> Tick.WARN
+      }
+
+  /** The circles tick: checked in today ⇒ good; not today but wake-up circles on the phone ⇒ partial; none ⇒ wrong. */
+  fun circlesTick(checkedInToday: Boolean, circlesHeld: Int): Tick =
+      when {
+        checkedInToday -> Tick.OK
+        circlesHeld > 0 -> Tick.PART
+        else -> Tick.WARN
+      }
+
+  /** The map tick: saved ⇒ good; a save pass running now ⇒ partial; anything else (waiting for Wi-Fi, failed, none) ⇒ wrong. */
+  fun mapTick(saved: Boolean, saving: Boolean): Tick =
+      when {
+        saved -> Tick.OK
+        saving -> Tick.PART
+        else -> Tick.WARN
+      }
 
   /** The offline map as the check text tells it. */
   data class MapCheck(val saved: Boolean, val savingPercent: Int? = null, val waitingForWifi: Boolean = false)
@@ -402,33 +443,41 @@ object FolloRules {
       latestCode: Long?,
       latestVersion: String?,
       circlesDay: String? = null,
+      compass: String? = null,
+      /** How many wake-up circles the phone holds (FP083): not checked in today but circles held = partial. */
+      circlesHeld: Int = 0,
+      /** Since when the newest build has been out (status `latest.aat`, epoch seconds); null = not known. */
+      latestAtS: Long? = null,
   ): String {
     val today = checkedInToday(statusAtMs, nowMs, zone)
     // the held circles' own date from Edit Circles (Alex asked for the "circle date"), when they carry one
     val set = circlesDay?.let { " (circles of $it)" } ?: ""
     val circles =
-        when {
-          today -> "$TICK_OK Circles: checked in today, ${clock(statusAtMs, zone)}$set"
-          statusAtMs > 0L -> "$TICK_WARN Circles: last checked in ${dayClock(statusAtMs, zone)}$set"
-          else -> "$TICK_WARN Circles: never checked in"
+        when (circlesTick(today, circlesHeld)) {
+          Tick.OK -> "$TICK_OK Circles: checked in today, ${clock(statusAtMs, zone)}$set"
+          Tick.PART ->
+              "$TICK_PART Circles: " +
+                  (if (statusAtMs > 0L) "last checked in ${dayClock(statusAtMs, zone)}" else "never checked in") +
+                  ", circles on this phone$set"
+          Tick.WARN ->
+              if (statusAtMs > 0L) "$TICK_WARN Circles: last checked in ${dayClock(statusAtMs, zone)}$set"
+              else "$TICK_WARN Circles: never checked in"
         }
     val offline =
-        if (map.saved) "$TICK_OK Offline map: on this phone"
-        else
-            "$TICK_WARN Offline map: not on this phone" +
-                when {
-                  map.savingPercent != null -> ", saving ${map.savingPercent}%"
-                  map.waitingForWifi -> ", waiting for Wi-Fi"
-                  else -> ""
-                }
+        when (mapTick(map.saved, map.savingPercent != null)) {
+          Tick.OK -> "$TICK_OK Offline map: on this phone"
+          Tick.PART -> "$TICK_PART Offline map: saving ${map.savingPercent}%"
+          Tick.WARN -> "$TICK_WARN Offline map: not on this phone" + if (map.waitingForWifi) ", waiting for Wi-Fi" else ""
+        }
     val app =
-        when {
-          latestCode == null -> "$TICK_OK App: $version"
-          versionCode >= latestCode -> "$TICK_OK App: $version, the latest"
-          else -> "$TICK_WARN App: $version, latest is ${latestVersion ?: latestCode.toString()}"
+        when (appTick(versionCode, latestCode, latestAtS, nowMs / 1000)) {
+          Tick.OK -> if (latestCode == null) "$TICK_OK App: $version" else "$TICK_OK App: $version, the latest"
+          Tick.PART -> "$TICK_PART App: $version, latest is ${latestVersion ?: latestCode.toString()} (new)"
+          Tick.WARN -> "$TICK_WARN App: $version, latest is ${latestVersion ?: latestCode.toString()}"
         }
     // Same order as the ticks on screen (Alex 15 Nov 2026: "✅app ✅⭕ ✅map")
-    return listOf("FOLLO Tracks check", "Phone: $phone ($device, $os)", app, circles, offline).joinToString("\n")
+    // the compass line (spec §5, 16 Nov 2026) last: it is not one of the three ticks
+    return listOfNotNull("FOLLO Tracks check", "Phone: $phone ($device, $os)", app, circles, offline, compass).joinToString("\n")
   }
 
   private fun clock(ms: Long, zone: java.time.ZoneId): String =
@@ -504,5 +553,194 @@ object FolloRules {
   }
 
   private fun atanhOf(x: Double): Double = 0.5 * kotlin.math.ln((1 + x) / (1 - x))
-}
 
+  // ── Compass heading pill (Cam Allport 15 Nov 2026, spec §5 of NEXT_VERSION_SPEC_20261115) ─────────────────
+  private val CARDINALS =
+      arrayOf("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+
+  /** Whole degrees 0–359 for a bearing (359.6 rounds to 0, never 360). */
+  fun headingDegrees(bearing: Float): Int = Math.floorMod(kotlin.math.round(bearing).toInt(), 360)
+
+  /** The 16-point cardinal of whole [degrees]: each 22.5° wide and centred, so 349–11 = N, 12–33 = NNE. */
+  fun cardinal16(degrees: Int): String =
+      CARDINALS[Math.floorMod(((Math.floorMod(degrees, 360) + 11.25) / 22.5).toInt(), 16)]
+
+  /** The pill's text: "112°  ESE" (degree sign, two spaces). */
+  fun headingText(bearing: Float): String = headingDegrees(bearing).let { "$it°  ${cardinal16(it)}" }
+
+  /**
+   * The share check's line: "Compass: 112° ESE true (±10°)"; "magnetic" before the phone has had a fix (no
+   * declination yet); the ± only when the sensor gives an estimate; "Compass: none" without a reading.
+   */
+  fun compassCheckLine(bearing: Float?, trueNorth: Boolean, accuracyDeg: Float?): String {
+    if (bearing == null) return "Compass: none"
+    val d = headingDegrees(bearing)
+    val acc = accuracyDeg?.takeIf { it >= 0f }?.let { " (±${kotlin.math.round(it).toInt()}°)" } ?: ""
+    return "Compass: $d° ${cardinal16(d)} ${if (trueNorth) "true" else "magnetic"}$acc"
+  }
+
+  /** Poor calibration (spec: an estimate worse than this, or the sensor saying UNRELIABLE / LOW): the pill greys. */
+  const val COMPASS_POOR_DEG = 25f
+
+  /** SensorManager.SENSOR_STATUS_ACCURACY_LOW (= 1); UNRELIABLE = 0. */
+  private const val SENSOR_ACCURACY_LOW = 1
+
+  fun compassPoor(sensorAccuracy: Int, accuracyDeg: Float?): Boolean =
+      sensorAccuracy <= SENSOR_ACCURACY_LOW || (accuracyDeg != null && accuracyDeg > COMPASS_POOR_DEG)
+
+  /**
+   * The bearing (degrees from MAGNETIC north, 0–360) of the top of the screen AS DRAWN, from the rotation matrix [r]
+   * (device axes in world east/north/up, row-major, SensorManager.getRotationMatrix*) and the display's rotation in
+   * degrees (Surface.ROTATION_x × 90). The rotate button turns the screen by asking for that orientation, so the display
+   * rotation already includes its turn. Screen-up is the device's +Y upright, +X at 90 (the phone's right edge is the
+   * top), −Y at 180, −X at 270 (what SensorManager.remapCoordinateSystem gives for the standard axis pairs). Screen-up
+   * and into-the-screen are added and flattened: lying flat that is where the top edge points; held upright, where the
+   * back faces; so it never goes wild when tilted. Null when pointing straight up or down.
+   */
+  fun screenBearing(r: FloatArray, rotationDeg: Int): Float? {
+    val (ue, un) =
+        when (Math.floorMod(rotationDeg, 360)) {
+          90 -> r[0] to r[3]
+          180 -> -r[1] to -r[4]
+          270 -> -r[0] to -r[3]
+          else -> r[1] to r[4]
+        }
+    val east = ue - r[2]
+    val north = un - r[5]
+    if (kotlin.math.hypot(east, north) < 0.2f) return null
+    return ((Math.toDegrees(kotlin.math.atan2(east, north).toDouble()).toFloat() % 360f) + 360f) % 360f
+  }
+
+  /**
+   * Sideways, the heading pill goes straight above the position pill when the two side by side (heading at the row's
+   * left, position at its right) would leave less than [gap] between them (spec §5).
+   */
+  fun pillsStack(rowWidth: Float, headingWidth: Float, coordsWidth: Float, gap: Float): Boolean =
+      coordsWidth > 0f && headingWidth + gap + coordsWidth > rowWidth
+
+  /** The display rotation (degrees) that the rotate button's turn asks for on a phone (FolloScreenTurner.requested). */
+  fun displayRotationOfTurn(turnDeg: Int): Int = Math.floorMod(turnDeg, 360) / 90 * 90
+
+  // ── Navigation arrow (Alex 15 Nov 2026, FP033) ───────────────────────────────────────────────────────────
+  /**
+   * The arrow's height in the map view: the middle of the WHOLE screen ([screenH] = the window, status bar and footer
+   * included), whatever covers the map; [mapTop] = the map view's top in that window. Clamped into the map.
+   */
+  fun arrowSpotY(screenH: Float, mapTop: Float, mapH: Float): Float =
+      (screenH / 2f - mapTop).coerceIn(0f, mapH.coerceAtLeast(0f))
+
+  // ── Offline map check-in (Alex 15 Nov 2026, FP034) ───────────────────────────────────────────────────────
+  /** A check-in for a map that stopped part-way waits at least this long after the last one (100 % never waits). */
+  const val MAP_CHECK_IN_MIN_MS = 60_000L
+
+  /**
+   * After a pass of the offline map that FETCHED tiles: check in so base camp's phone table sees the new percent
+   * without the app being reopened — when it reached 100 %, or stopped part-way (no signal, waiting for Wi-Fi, too many
+   * failures) at a percent not yet reported, at most once a minute. [lastSent] = the percent of the last such check-in.
+   */
+  fun mapCheckInDue(fetched: Boolean, percent: Int?, lastSent: Int?, sinceLastMs: Long): Boolean =
+      fetched && percent != null && percent != lastSent && (percent >= 100 || sinceLastMs >= MAP_CHECK_IN_MIN_MS)
+
+  // ── Ghost dots (FP079, a coordinator, 21 Nov 2026: two searchers sat on the FG circle's line after they had driven out) ──
+  // Phones post only inside the circle, so the last fix of someone who leaves is on its edge and nothing replaces it.
+  // The live map's rule (hasLeft, 24 Oct / 17 Nov 2026): a fix at least LEFT_AFTER_S old that lies within LEFT_EDGE_M
+  // of the edge = that person has left. Contract: NEXT_BUILD_SPEC_20261122.md §B1.
+
+  const val LEFT_AFTER_S = 30L
+  const val LEFT_EDGE_M = 30.0
+
+  /**
+   * How far inside the edge of [circles] (one search area's, its Basecamp circle included) a point lies: the most of
+   * radius − distance to the centre over the circles (a point deep inside an overlapping circle is not near the edge);
+   * in no circle ⇒ 0; no circles ⇒ infinity (nothing to judge by).
+   */
+  fun depthM(lat: Double, lon: Double, circles: List<Circle>): Double {
+    if (circles.isEmpty()) return Double.POSITIVE_INFINITY
+    var best = 0.0
+    for (c in circles) best = maxOf(best, c.r - distanceM(lat, lon, c.lat, c.lon))
+    return best
+  }
+
+  /** A person's dot is "left": not drawn, not counted, not listed, until their next fix. */
+  fun hasLeft(ageS: Long, depthM: Double): Boolean = ageS >= LEFT_AFTER_S && depthM <= LEFT_EDGE_M
+
+  /**
+   * [depthM] of a dot. [area] = the search the server names for it (GET /all): judged on that area's held circles
+   * (not held ⇒ infinity: the server's own judgement stands). No area named (a team-mate from a /pub reply): the held
+   * areas the point lies in; in none of them ⇒ 0 while the phone holds any circles at all, else infinity.
+   */
+  fun dotDepthM(lat: Double, lon: Double, area: String?, areas: Map<String, List<Circle>>): Double {
+    if (area != null) return depthM(lat, lon, areas[area].orEmpty())
+    if (areas.isEmpty()) return Double.POSITIVE_INFINITY
+    val inside = areas.values.filter { cs -> cs.any { insideCircle(lat, lon, it) } }
+    return if (inside.isEmpty()) 0.0 else inside.maxOf { depthM(lat, lon, it) }
+  }
+
+  // ── Other people's dots as on the live map (FP078, Alex 21 Nov 2026) ───────────────────────────────────────
+  // 12 dp across with a 1 dp black edge, the team's colour inside; the tracker ID in a small dark label to the right
+  // whose pointer triangle is the colour of their vest. The server sends the fill (`tc`) and the vest (`vest`).
+
+  const val DOT_NO_COLOUR = 0xFFBBBBBB.toInt()
+  const val VEST_YELLOW = 0xFFE4FF1A.toInt()
+  const val VEST_ORANGE = 0xFFFF7A00.toInt()
+  const val VEST_PINK = 0xFFFF3FA6.toInt()
+  const val VEST_NONE = 0xFFFFFFFF.toInt()
+
+  /** `tc` "#rrggbb" ⇒ that colour, opaque; anything else ⇒ the no-team grey #BBBBBB. */
+  fun dotColour(tc: String?): Int {
+    val t = tc?.trim().orEmpty()
+    if (t.length != 7 || t[0] != '#') return DOT_NO_COLOUR
+    val v = t.substring(1).toIntOrNull(16) ?: return DOT_NO_COLOUR
+    return 0xFF000000.toInt() or v
+  }
+
+  /** `vest` Y / O / P ⇒ hi-vis yellow, orange, pink; none or anything else ⇒ white. */
+  fun vestColour(vest: String?): Int =
+      when (vest) {
+        "Y" -> VEST_YELLOW
+        "O" -> VEST_ORANGE
+        "P" -> VEST_PINK
+        else -> VEST_NONE
+      }
+
+  // ── "Share everywhere I go" (Alex, 22 Nov 2026; NEXT_BUILD_SPEC_20261122.md §D; the flag: support/FolloEverywhere) ──
+
+  /** The row is offered only while the last status element says this server takes such posts (`ev: 1`). */
+  fun everywhereOffered(statusEv: Int?): Boolean = statusEv == 1
+
+  /**
+   * Nothing from BEFORE the OK (spec §H, 22 Nov 2026): a fix whose own time is earlier than the moment the mode was
+   * turned on is never sent under it (not by the switch-on check-in, not from a cache, not by the first callback of
+   * the tracking); such a fix is judged by the normal gate like any other.
+   */
+  fun everywhereMaySend(fixTimeMs: Long, onSinceMs: Long): Boolean = fixTimeMs >= onSinceMs
+
+  /** What goes in a post's `ev`: 1 while the mode is on, else NOTHING (the key is then left out of the body). */
+  fun everywhereWire(on: Boolean): Int? = if (on) 1 else null
+
+  /**
+   * The gate with the mode: on ⇒ every fix is shared, whatever the circles, the windows or the mode say; off ⇒ the
+   * gate's own verdict, exactly as before ([gateVerdict]).
+   */
+  fun gateVerdictWith(everywhere: Boolean, beyondM: Double, sinceMs: Long?, nowMs: Long, mode: MonitoringMode, checkIn: Boolean = false): GateVerdict =
+      if (everywhere) GateVerdict.SHARE else gateVerdict(beyondM, sinceMs, nowMs, mode, checkIn)
+
+  /** A server command's `monitoring` while the mode is on is not applied (the mode is Move, full stop). */
+  fun appliesRemoteMonitoring(everywhere: Boolean): Boolean = !everywhere
+
+  /** [config] without its `monitoring` (what is applied of a server command while the mode is on); waypoints kept. */
+  fun withoutMonitoring(config: MessageConfiguration): MessageConfiguration {
+    val rest = MessageConfiguration()
+    for (k in config.keys) if (k != "monitoring") rest[k] = config[k]
+    rest.waypoints = config.waypoints
+    return rest
+  }
+
+  /** A status element that ARRIVES without `ev: 1` while the mode is on switches it off (the server's off-switch). */
+  fun everywhereEndedBy(everywhere: Boolean, statusEv: Int?): Boolean = everywhere && statusEv != 1
+
+  /** The pop-up comes again when the app is brought to the front this long after it was last shown. */
+  const val EVERYWHERE_REMIND_MS = 12 * 3600 * 1000L
+
+  fun reminderDue(lastShownMs: Long, nowMs: Long): Boolean = nowMs - lastShownMs >= EVERYWHERE_REMIND_MS
+}

@@ -261,6 +261,8 @@ constructor(
       // which posted the first fix before the hello's reply arrived (Samsung test 1 Nov 2026); the server sets the
       // mode it wants in that reply (Manual with circles, Significant when moving with none).
       preferences.monitoring = MonitoringMode.Manual
+      // and never in "Share everywhere I go": whoever sets a phone up afresh chooses that again themselves (22 Nov 2026)
+      org.owntracks.android.support.FolloEverywhere.set(false)
       if (config.waypoints.isNotEmpty()) waypointsRepo.importFromMessage(config.waypoints)
       (config["folloName"] as? String)?.let { preferences.displayName = it }
       folloTrackRepo.clear() // a new setup starts a clean track

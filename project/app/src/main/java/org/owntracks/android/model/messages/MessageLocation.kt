@@ -121,6 +121,16 @@ open class MessageLocation(
   // FOLLO diagnostics (21 Oct 2026), see FolloDiag; only the FOLLO server reads it
   @SerialName("fd") var fd: FolloDiag? = null
 
+  // FOLLO "Share everywhere I go" (Alex, 22 Nov 2026): 1 on a post made while that mode is on, else NOT in the body at
+  // all (null is never written). The server then keeps the fix wherever it is. Set only by LocationProcessor.
+  @SerialName("ev") var ev: Int? = null
+
+  // FOLLO team-mates from the server (22 Nov 2026, FP078): their team as this phone should show it, the dot's fill
+  // "#rrggbb" and their vest (Y / O / P; none = no vest). Never set on this phone's own posts.
+  @SerialName("team") var team: String? = null
+  @SerialName("tc") var teamColour: String? = null
+  @SerialName("vest") var vest: String? = null
+
   override fun isValidMessage(): Boolean {
     // The deserializer validates that required fields are present in JSON
     // Constraints: timestamp > 0 and (trackerId is not empty OR visibleTopic is not empty)

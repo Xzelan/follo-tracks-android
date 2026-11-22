@@ -452,10 +452,11 @@ class FolloRulesTest {
         FolloRules.checkText("x", "y", "Android 14", at(hobart, 2026, 11, 15, 9, 12) * 1000, now, hobart,
             FolloRules.MapCheck(saved = true), "0.1.39", 400139000, 400139000, "0.1.39", circlesDay = "9.11.2026")
     assertTrue(dated.contains("✅ Circles: checked in today, 9:12 am (circles of 9.11.2026)"))
-    assertTrue(bad.contains("⚠️ Offline map: not on this phone, saving 45%"))
+    // FP083 (22 Nov 2026): a map that is being saved right now is the partial state, no longer a warning
+    assertTrue(bad.contains("\uD83D\uDD04 Offline map: saving 45%"))
     // the same order as the ticks on screen (Alex 15 Nov 2026): app, circles, map
     assertTrue(bad.contains("Android 14)\n⚠️ App: 0.1.35, latest is 0.1.39\n⚠️ Circles:"))
-    assertTrue(bad.endsWith("⚠️ Offline map: not on this phone, saving 45%"))
+    assertTrue(bad.endsWith("\uD83D\uDD04 Offline map: saving 45%"))
     val never =
         FolloRules.checkText("FOLLO Tracks", "x", "Android 14", 0L, now, hobart,
             FolloRules.MapCheck(saved = false, waitingForWifi = true), "0.1.39", 400139000, null, null)
@@ -499,5 +500,186 @@ class FolloRulesTest {
         FolloRules.coordsShare(-27.5, 153.0),
     )
     assertEquals("-41.123456, 146.654321", FolloRules.latLonText(-41.123456, 146.654321))
+  }
+
+  // ── 22 Nov 2026: ghost dots (FP079), dots (FP078), three-state ticks (FP083), "Share everywhere I go" ─────────────
+  // Shared vectors: FOLLO_tracks/docs/NEXT_BUILD_SPEC_20261122.md §E.
+
+  @Test
+  fun `a dot has left when its fix is 30 s old and within 30 m of the edge`() {
+    assertFalse(FolloRules.hasLeft(29, 5.0))
+    assertTrue(FolloRules.hasLeft(30, 5.0))
+    assertTrue(FolloRules.hasLeft(30, 30.0))
+    assertFalse(FolloRules.hasLeft(30, 30.1))
+    assertFalse(FolloRules.hasLeft(4000, 500.0))
+    assertFalse(FolloRules.hasLeft(4000, Double.POSITIVE_INFINITY)) // no circles to judge by: never left
+  }
+
+  @Test
+  fun `depth is how far inside the edge of the area's circles a point lies`() {
+    val a = FolloRules.Circle(-41.10, 146.80, 1000.0, "A")
+    val b = FolloRules.Circle(-41.10, 146.82, 1000.0, "A")
+    val both = listOf(a, b)
+    val mPerDeg = 111_194.93
+    assertEquals(1000.0, FolloRules.depthM(-41.10, 146.80, listOf(a)), 0.001)
+    assertEquals(10.0, FolloRules.depthM(-41.10 + 990 / mPerDeg, 146.80, both), 0.5) // 990 m north of A's centre
+    // 995 m east of A's centre: 5 m inside A's edge but deep in B, so not near the edge of the two together
+    val east = 146.80 + 995 / (mPerDeg * Math.cos(Math.toRadians(41.10)))
+    assertEquals(319.0, FolloRules.depthM(-41.10, east, both), 3.0)
+    assertEquals(0.0, FolloRules.depthM(-41.10 + 3000 / mPerDeg, 146.80, both), 0.0) // in no circle
+    assertTrue(FolloRules.depthM(-41.10, 146.80, emptyList()).isInfinite())
+  }
+
+  @Test
+  fun `a dot is judged on the circles of its own search area`() {
+    val areas =
+        mapOf(
+            "A" to listOf(FolloRules.Circle(-41.10, 146.80, 1000.0, "A")),
+            "B" to listOf(FolloRules.Circle(-41.50, 146.80, 1000.0, "B")),
+        )
+    val nearEdgeOfA = -41.10 + 990 / 111_194.93
+    assertEquals(10.0, FolloRules.dotDepthM(nearEdgeOfA, 146.80, "A", areas), 0.5)
+    assertEquals(10.0, FolloRules.dotDepthM(nearEdgeOfA, 146.80, null, areas), 0.5) // a team-mate: the area it lies in
+    assertTrue(FolloRules.dotDepthM(nearEdgeOfA, 146.80, "MV", areas).isInfinite()) // an area this phone holds no circles for
+    assertEquals(0.0, FolloRules.dotDepthM(-41.30, 146.80, null, areas), 0.0) // in none of the held areas
+    assertTrue(FolloRules.dotDepthM(-41.30, 146.80, null, emptyMap()).isInfinite())
+  }
+
+  @Test
+  fun `the vest decides the label's triangle and the server's tc the dot`() {
+    assertEquals(0xFFE4FF1A.toInt(), FolloRules.vestColour("Y"))
+    assertEquals(0xFFFF7A00.toInt(), FolloRules.vestColour("O"))
+    assertEquals(0xFFFF3FA6.toInt(), FolloRules.vestColour("P"))
+    assertEquals(0xFFFFFFFF.toInt(), FolloRules.vestColour(null))
+    assertEquals(0xFFFFFFFF.toInt(), FolloRules.vestColour("X"))
+    assertEquals(0xFF5CC8FF.toInt(), FolloRules.dotColour("#5cc8ff"))
+    for (bad in listOf(null, "", "blue", "#12")) assertEquals(0xFFBBBBBB.toInt(), FolloRules.dotColour(bad))
+  }
+
+  @Test
+  fun `the app tick has three states`() {
+    val now = 1_800_000_000L
+    assertEquals(FolloRules.Tick.OK, FolloRules.appTick(400148000, null, null, now))
+    assertEquals(FolloRules.Tick.OK, FolloRules.appTick(400148000, 400148000, now - 10 * 86400, now))
+    assertEquals(FolloRules.Tick.PART, FolloRules.appTick(400147000, 400148000, now - 47 * 3600, now))
+    assertEquals(FolloRules.Tick.WARN, FolloRules.appTick(400147000, 400148000, now - 48 * 3600, now))
+    assertEquals(FolloRules.Tick.WARN, FolloRules.appTick(400147000, 400148000, null, now))
+  }
+
+  @Test
+  fun `the circles tick has three states`() {
+    assertEquals(FolloRules.Tick.OK, FolloRules.circlesTick(checkedInToday = true, circlesHeld = 0))
+    assertEquals(FolloRules.Tick.PART, FolloRules.circlesTick(checkedInToday = false, circlesHeld = 3))
+    assertEquals(FolloRules.Tick.WARN, FolloRules.circlesTick(checkedInToday = false, circlesHeld = 0))
+  }
+
+  @Test
+  fun `the map tick has three states`() {
+    assertEquals(FolloRules.Tick.OK, FolloRules.mapTick(saved = true, saving = false))
+    assertEquals(FolloRules.Tick.PART, FolloRules.mapTick(saved = false, saving = true))
+    assertEquals(FolloRules.Tick.WARN, FolloRules.mapTick(saved = false, saving = false)) // waiting for Wi-Fi, failed, none
+  }
+
+  @Test
+  fun `the middle sign is the anticlockwise arrows Alex chose`() {
+    assertEquals(0x1F504, FolloRules.TICK_PART.codePointAt(0))
+    assertEquals(2, FolloRules.TICK_PART.length)
+    assertEquals(FolloRules.TICK_PART, FolloRules.Tick.PART.sign)
+  }
+
+  @Test
+  fun `the shared check says the partial states in words`() {
+    val hobart = java.time.ZoneId.of("Australia/Hobart")
+    val sat = java.time.ZonedDateTime.of(2026, 11, 21, 16, 5, 0, 0, hobart).toInstant().toEpochMilli()
+    val sun = java.time.ZonedDateTime.of(2026, 11, 22, 7, 0, 0, 0, hobart).toInstant().toEpochMilli()
+    val text =
+        FolloRules.checkText(
+            "Test phone (TP1)", "Samsung Galaxy A14", "Android 14", sat, sun, hobart,
+            FolloRules.MapCheck(saved = false, savingPercent = 53), "0.1.47", 400147000, 400148000, "0.1.48",
+            circlesDay = "9.11.2026", circlesHeld = 3, latestAtS = sun / 1000 - 3600,
+        )
+    val lines = text.split("\n")
+    assertEquals("\uD83D\uDD04 App: 0.1.47, latest is 0.1.48 (new)", lines[2])
+    assertEquals("\uD83D\uDD04 Circles: last checked in Sat 21 Nov, 4:05 pm, circles on this phone (circles of 9.11.2026)", lines[3])
+    assertEquals("\uD83D\uDD04 Offline map: saving 53%", lines[4])
+    // never heard from the server, but circles came with the setup link
+    val never =
+        FolloRules.checkText("x", "y", "Android 14", 0L, sun, hobart, FolloRules.MapCheck(saved = false, waitingForWifi = true),
+            "0.1.47", 400147000, 400148000, "0.1.48", circlesHeld = 2)
+    assertTrue(never, never.contains("\uD83D\uDD04 Circles: never checked in, circles on this phone"))
+    assertTrue(never, never.contains("⚠️ Offline map: not on this phone, waiting for Wi-Fi"))
+    assertTrue(never, never.contains("⚠️ App: 0.1.47, latest is 0.1.48"))
+    assertFalse(never, never.contains("(new)"))
+  }
+
+  @Test
+  fun `the share everywhere row is offered only while the server says so`() {
+    assertTrue(FolloRules.everywhereOffered(1))
+    assertFalse(FolloRules.everywhereOffered(null))
+    assertFalse(FolloRules.everywhereOffered(0))
+  }
+
+  @Test
+  fun `with share everywhere on every fix is shared, off the gate is exactly as before`() {
+    val now = 1_000_000L
+    // 5 km outside every circle, no window open (nothing counts = infinitely far), standing by
+    for (beyond in listOf(5000.0, Double.POSITIVE_INFINITY)) {
+      for (mode in MonitoringMode.entries) {
+        assertEquals(FolloRules.GateVerdict.SHARE, FolloRules.gateVerdictWith(true, beyond, now - 600_000, now, mode))
+        assertEquals(
+            FolloRules.gateVerdict(beyond, now - 600_000, now, mode),
+            FolloRules.gateVerdictWith(false, beyond, now - 600_000, now, mode),
+        )
+      }
+    }
+    assertEquals(FolloRules.GateVerdict.STANDBY, FolloRules.gateVerdictWith(false, 5000.0, null, now, MonitoringMode.Move))
+    assertEquals(FolloRules.GateVerdict.HOLD, FolloRules.gateVerdictWith(false, 5.0, null, now, MonitoringMode.Move))
+    assertEquals(FolloRules.GateVerdict.SHARE, FolloRules.gateVerdictWith(true, 5.0, null, now, MonitoringMode.Move, checkIn = true))
+  }
+
+  @Test
+  fun `a post says ev 1 only while the mode is on`() {
+    assertEquals(1, FolloRules.everywhereWire(true))
+    assertNull(FolloRules.everywhereWire(false))
+  }
+
+  @Test
+  fun `the server's monitoring is not applied while share everywhere is on, the rest of the command is`() {
+    assertFalse(FolloRules.appliesRemoteMonitoring(everywhere = true))
+    assertTrue(FolloRules.appliesRemoteMonitoring(everywhere = false))
+    val cmd =
+        MessageConfiguration().apply {
+          this["monitoring"] = 0
+          this["moveModeLocatorInterval"] = 5
+        }
+    val rest = FolloRules.withoutMonitoring(cmd)
+    assertFalse(rest.containsKey("monitoring"))
+    assertEquals(5, rest["moveModeLocatorInterval"])
+    assertEquals(0, cmd["monitoring"]) // the command itself is not changed
+  }
+
+  @Test
+  fun `a status that arrives without ev ends the mode, and only then`() {
+    assertTrue(FolloRules.everywhereEndedBy(everywhere = true, statusEv = null))
+    assertTrue(FolloRules.everywhereEndedBy(everywhere = true, statusEv = 0))
+    assertFalse(FolloRules.everywhereEndedBy(everywhere = true, statusEv = 1))
+    assertFalse(FolloRules.everywhereEndedBy(everywhere = false, statusEv = null))
+  }
+
+  @Test
+  fun `the reminder is due 12 hours after the pop-up was last shown`() {
+    val h = 3_600_000L
+    assertFalse(FolloRules.reminderDue(0L + 1_000_000, 1_000_000 + 12 * h - 60_000)) // 11 h 59 min
+    assertTrue(FolloRules.reminderDue(1_000_000, 1_000_000 + 12 * h))
+  }
+
+  /** Spec §H (22 Nov 2026): nothing from before the OK. */
+  @Test
+  fun `a fix may go under share everywhere only if it was taken at or after the OK`() {
+    val ok = 1_795_312_465_000L
+    assertFalse(FolloRules.everywhereMaySend(ok - 1_000, ok)) // 1 s before
+    assertFalse(FolloRules.everywhereMaySend(ok - 1, ok))
+    assertTrue(FolloRules.everywhereMaySend(ok, ok))
+    assertTrue(FolloRules.everywhereMaySend(ok + 5_000, ok))
   }
 }

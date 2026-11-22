@@ -34,6 +34,8 @@ import org.owntracks.android.data.repos.AsyncDeQueue
 import org.owntracks.android.data.repos.ContactsRepo
 import org.owntracks.android.data.repos.EndpointStateRepo
 import org.owntracks.android.data.repos.FolloStatusRepo
+import org.owntracks.android.support.FolloEverywhere
+import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.data.waypoints.WaypointsRepo
 import org.owntracks.android.di.ApplicationScope
 import org.owntracks.android.di.CoroutineScopes.IoDispatcher
@@ -623,6 +625,10 @@ constructor(
     processInOrder {
       Timber.d("Received FOLLO status $message")
       folloStatusRepo.setStatus(message)
+      // "Share everywhere I go" (22 Nov 2026): a status element that ARRIVES without `ev: 1` is the server's off-switch
+      if (FolloRules.everywhereEndedBy(FolloEverywhere.isOn, message.ev)) {
+        locationProcessorLazy.get().onEverywhereOff(byServer = true)
+      }
       message.name?.takeIf { it.isNotBlank() && it != preferences.displayName }?.let {
         preferences.displayName = it
       }
@@ -736,7 +742,11 @@ constructor(
               )
             } else {
               if (message.configuration != null) {
-                preferences.importConfiguration(message.configuration!!)
+                // "Share everywhere I go" (22 Nov 2026): while it is on the mode is Move, full stop; the server's
+                // `monitoring` is not applied (the rest of the command, e.g. the 5 s interval, is)
+                val cfg = message.configuration!!
+                preferences.importConfiguration(
+                    if (FolloRules.appliesRemoteMonitoring(FolloEverywhere.isOn)) cfg else FolloRules.withoutMonitoring(cfg))
               } else {
                 Timber.i("No remote configuration provided")
               }

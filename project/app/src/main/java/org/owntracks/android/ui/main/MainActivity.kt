@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateUtils
 import android.view.Choreographer
+import android.view.Gravity
 import android.view.View
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -41,6 +42,7 @@ import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -70,6 +72,7 @@ import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.services.BackgroundService
 import org.owntracks.android.services.LocationProcessor
 import org.owntracks.android.support.ContactImageBindingAdapter
+import org.owntracks.android.support.FolloEverywhere
 import org.owntracks.android.support.FolloPower
 import org.owntracks.android.support.RequirementsChecker
 import org.owntracks.android.ui.NotificationsStash
@@ -83,8 +86,8 @@ import timber.log.Timber
 /**
  * The one FOLLO Tracks screen: a live aerial map (you, the search area, FOLLO's markers and the
  * other trackers the server shares), a status banner that says in plain words whether the phone is
- * sharing, standing by or needs something fixed, and a card with who this phone is and when it
- * last sent. There are no settings: the phone is set up by a FOLLO link and the server drives the
+ * sharing, standing by or needs something fixed with a two-way symbol for the link to the server,
+ * and (19 Nov 2026) one "…" button that shows or hides the layer and function buttons. There are no settings: the phone is set up by a FOLLO link and the server drives the
  * rest.
  */
 @AndroidEntryPoint
@@ -98,9 +101,14 @@ class MainActivity :
   @Inject lateinit var folloGridRepo: org.owntracks.android.data.repos.FolloGridRepo
   @Inject lateinit var folloDrawRepo: org.owntracks.android.data.repos.FolloDrawRepo
   @Inject lateinit var folloOfflineRepo: org.owntracks.android.data.repos.FolloOfflineRepo
+  @Inject lateinit var folloWatchRepo: org.owntracks.android.data.repos.FolloWatchRepo
+  @Inject lateinit var folloScopeRepo: org.owntracks.android.data.repos.FolloScopeRepo
+  @Inject lateinit var folloLayRepo: org.owntracks.android.data.repos.FolloLayRepo
+  @Inject lateinit var folloLinkRepo: org.owntracks.android.data.repos.FolloLinkRepo
   @Inject lateinit var requirementsChecker: RequirementsChecker
   @Inject lateinit var notificationsStash: NotificationsStash
   @Inject lateinit var contactImageBindingAdapter: ContactImageBindingAdapter
+  @Inject lateinit var locationProcessor: LocationProcessor
 
   private val viewModel: MainViewModel by viewModels()
   private lateinit var binding: ActivityMainBinding
@@ -266,12 +274,20 @@ class MainActivity :
     }
     binding.alwaysOpen.setOnClickListener { requestBackgroundLocation() }
 
-    compass = FolloCompass(this) { if (camera == Camera.NAV) requestNavFrame() }
+    compass =
+        FolloCompass(this) {
+          if (camera == Camera.NAV) requestNavFrame()
+          schedulePill()
+        }
+    // The compass heading pill (Cam Allport 15 Nov 2026): a small dial at its left; a tap while calibration is poor
+    // says how to calibrate
+    headingDial = FolloCompassDial(dp(16f), dp(1.5f).toFloat())
+    binding.heading.setCompoundDrawablesRelativeWithIntrinsicBounds(headingDial, null, null, null)
+    binding.heading.setOnClickListener { if (compass.poor()) showCalibrate() }
     // Upright every time the app is opened; a turn chosen with the rotate button is kept only while the screen is
     // being made again (savedInstanceState), not over a fresh open.
     screenTurner = FolloScreenTurner(this)
     screenTurner.open(savedInstanceState?.takeIf { it.containsKey(TURN_KEY) }?.getInt(TURN_KEY))
-    binding.rotate.setOnClickListener { screenTurner.turn() }
     binding.recentre.setOnClickListener { recentre() }
     // The buttons hang under the banner and the position sits on the card, both of which grow and shrink with what
     // they say: place them again after any change (posted: a layout change asked for inside a layout pass is lost)
@@ -281,6 +297,8 @@ class MainActivity :
     binding.banner.addOnLayoutChangeListener(replace)
     binding.bottom.addOnLayoutChangeListener(replace)
     binding.notice.addOnLayoutChangeListener(replace)
+    binding.note.addOnLayoutChangeListener(replace)
+    binding.coords.addOnLayoutChangeListener(replace)
     binding.creditBar.addOnLayoutChangeListener { _, _, t, _, b, _, ot, _, ob ->
       if (b - t != ob - ot) binding.root.post { applyFoot() }
     }
@@ -294,18 +312,29 @@ class MainActivity :
     applyOrientation(resources.configuration.orientation)
     setUpMap()
     if (camera == Camera.NAV) setNavLook(true)
+    buildMenu()
+    buildWatch()
+    buildScope()
     binding.note.setOnClickListener { onNoteClicked() }
 
     binding.action.setOnClickListener { onActionClicked() }
-    // Power button (13 Nov 2026): hold 2 s = Off, one tap = on again
-    binding.power.onTurnOff = { setPower(off = true) }
-    binding.power.onTurnOn = { setPower(off = false) }
-    binding.power.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
     // The recentre button brings the arrow back (14 Nov 2026: a tap on the card no longer does); a tap on the banner
     // still does (Alex 24 Oct 2026). The offline map's sign on the card is gone: the second tick says it.
-    binding.banner.setOnClickListener { recentre() }
-    // Long press: send a position now (the way out of standing still inside a wake-up circle, review 21 Oct 2026).
-    binding.card.setOnLongClickListener {
+    binding.banner.setOnClickListener {
+      // A tap while the view is clean (18 Nov 2026) only brings everything back
+      if (clean) clean = false else recentre()
+    }
+    // Clean view (Alex 18 Nov 2026, only on a phone that may see every phone): a long press on the banner hides this
+    // phone's own arrow, the magenta lines, the rotate and recentre buttons, the card and the two pills; a tap shows them
+    binding.banner.setOnLongClickListener {
+      if (!watchAllowed || clean || FolloPower.isOff) return@setOnLongClickListener false
+      clean = true
+      true
+    }
+    // The two-way symbol (19 Nov 2026): a tap says who this phone is and when it last sent; a long press sends a
+    // position now (the card's long press; the way out of standing still inside a wake-up circle, review 21 Oct 2026).
+    binding.link.setOnClickListener { showLinkBubble() }
+    binding.link.setOnLongClickListener {
       if (!FolloPower.isOff && requirementsChecker.hasLocationPermissions() && preferences.setupCompleted) {
         Toast.makeText(this, R.string.follo_send_now, Toast.LENGTH_SHORT).show()
         pendingCheckIn = PendingCheckIn.USER
@@ -339,20 +368,10 @@ class MainActivity :
         }
         launch {
           syncContactMarkers()
+          // 22 Nov 2026 (FP078): team-mates are dots drawn by the top overlay, worked out afresh on every change
           viewModel.contactEvents.collect {
-            when (it) {
-              ContactsRepoChange.AllCleared -> {
-                map.overlays.removeAll { o -> o is Marker && o.id.startsWith(CONTACT_PREFIX) }
-                map.invalidate()
-              }
-              is ContactsRepoChange.ContactAdded -> showIfLeader(it.contact).also { drawPair() }
-              is ContactsRepoChange.ContactLocationUpdated -> showIfLeader(it.contact).also { drawPair() }
-              is ContactsRepoChange.ContactCardUpdated -> showIfLeader(it.contact)
-              is ContactsRepoChange.ContactRemoved -> {
-                map.overlays.removeAll { o -> o is Marker && o.id == CONTACT_PREFIX + it.contact.id }
-                map.invalidate()
-              }
-            }
+            syncContactMarkers()
+            if (it is ContactsRepoChange.ContactAdded || it is ContactsRepoChange.ContactLocationUpdated) drawPair()
           }
         }
         launch {
@@ -366,6 +385,7 @@ class MainActivity :
                 trackSendFailures(endpoint.state)
               }
               .collect {
+                scopeUpdate() // set up meanwhile, or the fix has gone stale (FP055)
                 drawAreaBox(viewModel.folloStatus.value?.message) // hides the area once its window ends
                 syncContactMarkers() // and takes a leader off the map once their fix is stale
                 drawPair()
@@ -387,13 +407,21 @@ class MainActivity :
             syncContactMarkers()
             drawPair()
             render()
+            watchStatusChanged()
+            // FP055: the areas the server already holds this phone's fixes for count as been to (kept on the phone)
+            it?.message?.beenRows()?.let(folloScopeRepo::merge)
+            scopeUpdate()
           }
         }
+        launch { folloScopeRepo.been.collect { scopeUpdate() } }
+        launch { folloWatchRepo.snapshot.collect { watchChanged() } }
         // The phone decides green/grey at the area edge itself, so every new fix may change it.
         launch {
           viewModel.currentLocation.collect {
             if (FolloPower.isOff) return@collect // a fix already on its way when the app was turned Off: forgotten
-            it?.let(viewModel::addTrack)
+            scopeUpdate() // FP055: which view this fix means, before anything is drawn from it
+            // FP055: the screen's own fixes join the walking track only inside a search area (an exempt phone: anywhere)
+            it?.takeIf { l -> !scopeActive || FolloScope.areasAt(l.latitude, l.longitude, scopeAreas).isNotEmpty() }?.let(viewModel::addTrack)
             it?.let { l -> folloOfflineRepo.notePosition(l.latitude, l.longitude) }
             it?.let(compass::updateDeclination)
             it?.let(::followCamera)
@@ -408,6 +436,8 @@ class MainActivity :
           while (true) {
             delay(15_000L)
             if (FolloRules.fixIsStale(fixAgeMs()) != shownStale) render()
+            scopeUpdate() // a fix gone stale ends LIVE (FP055)
+            if (syncTrackTail()) map.invalidate() // a short piece of the track that has gone quiet comes off (FP079)
           }
         }
         launch { folloOfflineRepo.state.collect { renderOffline(it) } }
@@ -415,11 +445,25 @@ class MainActivity :
           folloGridRepo.grid.collect {
             gridOverlay?.grid = it
             map.invalidate()
+            renderMenu() // the Grids and Labels buttons exist where the grids have lines / names
+          }
+        }
+        // The layers (19 Nov 2026): the list says which buttons exist, the files what can be drawn
+        launch { folloLayRepo.list.collect { renderMenu() } }
+        launch { folloLayRepo.held.collect { renderMenu() } }
+        // The two-way symbol: looked at again at least every 10 s while the screen is on
+        launch {
+          while (true) {
+            delay(10_000L)
+            renderLink()
           }
         }
         launch { folloDrawRepo.draw.collect(::showDrawings) }
         launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
+        // "Share everywhere I go" (22 Nov 2026): the switch, wherever it was thrown (here, or by the server's status)
+        launch { FolloEverywhere.onState.collect { everywhereChanged(it) } }
+        launch { FolloEverywhere.serverOffNotice.collect { render() } }
         launch {
           viewModel.tileState.collect { (url, maxZoom) ->
             if (::map.isInitialized && (map.tileProvider.tileSource as? FolloTileSource)?.matches(url, maxZoom) != true) {
@@ -428,6 +472,16 @@ class MainActivity :
               map.invalidate()
             }
           }
+        }
+      }
+    }
+
+    // Phones in circles (FolloWatch): asked every 10 s while the screen is in front, only on a phone the server names
+    lifecycleScope.launch {
+      repeatOnLifecycle(Lifecycle.State.RESUMED) {
+        while (true) {
+          if (watchAllowed && !FolloPower.isOff) folloWatchRepo.fetch()
+          delay(org.owntracks.android.data.repos.FolloWatchRepo.PERIOD_MS)
         }
       }
     }
@@ -485,23 +539,6 @@ class MainActivity :
     )
     bannerBg = null // the panel's shape changes: draw it again
     state?.let { setBannerColor(it.color) }
-    // The notice and the card: sideways as wide as the status panel, hard into the right side, sitting on the band.
-    // A little padding at the start and top keeps the card's shadow from being cut off.
-    val shadow = dp(8f)
-    binding.bottom.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
-      width = if (land) panelWidth() + barsRight + shadow else match
-      gravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
-    }
-    binding.card.minimumHeight = if (land) dp(LAND_CARD_DP) else 0
-    binding.card.updatePadding(
-        left = dp(16f),
-        top = dp(if (land) 8f else 13f),
-        right = dp(14f) + if (land) barsRight else 0,
-        bottom = dp(if (land) 8f else 13f),
-    )
-    binding.notice.updatePadding(left = dp(if (land) 16f else 12f), right = dp(12f) + if (land) barsRight else 0)
-    binding.notice.updateLayoutParams<android.widget.LinearLayout.LayoutParams> { bottomMargin = if (land) 0 else dp(8f) }
-    styleBottom()
     // The bottom band: the whole width (sideways it stops at a navigation bar on either side), down to the foot of the
     // screen; its row sits just above the navigation bar
     binding.creditBar.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
@@ -518,27 +555,12 @@ class MainActivity :
         right = if (land) panelWidth() + barsRight else 0,
         top = if (land) barsTop else 0,
     )
+    binding.waitCover.updatePadding(
+        right = if (land) panelWidth() + barsRight else 0,
+        top = if (land) barsTop else 0,
+    )
     applyFoot()
     placeOverlays()
-  }
-
-  /** Sideways, only the corner that faces the map is rounded; upright the panels keep their usual look. */
-  private fun styleBottom() {
-    val land = isLand()
-    val r = dp(16f).toFloat()
-    val noticeShown = binding.notice.visibility == View.VISIBLE
-    fun corner(color: Int, topLeft: Float) =
-        android.graphics.drawable.GradientDrawable().apply {
-          setColor(color)
-          cornerRadii = floatArrayOf(topLeft, topLeft, 0f, 0f, 0f, 0f, 0f, 0f)
-        }
-    if (land) {
-      binding.card.background = corner(getColor(R.color.follo_card), if (noticeShown) 0f else r)
-      binding.notice.background = corner(getColor(R.color.follo_amber), r)
-    } else {
-      binding.card.setBackgroundResource(R.drawable.bg_follo_card)
-      binding.notice.setBackgroundResource(R.drawable.bg_follo_notice)
-    }
   }
 
   private var bannerBg: Pair<Int, Boolean>? = null
@@ -559,38 +581,44 @@ class MainActivity :
     binding.statusStrip.setBackgroundColor(color)
   }
 
-  /** The recentre button's distance from the left edge and the rotate button's from the right edge (px). */
+  /** The recentre button's distance from the left edge and the "…" button's from the right edge (px). */
   private fun recentreStart(): Int = dp(12f) + if (isLand()) barsLeft else 0
 
-  private fun rotateEnd(): Int =
+  private fun moreEnd(): Int =
       if (isLand()) (binding.banner.width.takeIf { it > 0 } ?: (panelWidth() + barsRight)) + dp(10f) else dp(12f)
 
   /**
-   * The things over the map (14 Nov 2026). Upright: the recentre button top left and the rotate button top right,
-   * 10 dp under the banner. Sideways: the recentre button top left under the status bar, the rotate button level with
-   * it just left of the status panel. The position pill just above the right end of the card (or the notice).
+   * The things over the map (14 Nov 2026; 19 Nov the simple screen). Upright: the recentre button top left and the "…"
+   * button top right, 10 dp under the banner. Sideways: the recentre button top left under the status bar, the "…"
+   * button level with it just left of the status panel. The position pill just above the bottom band on the right
+   * (above the notices when one shows), the heading pill level with it on the left; the column under "…".
    */
   private fun placeOverlays() {
     if (!::binding.isInitialized) return
     val land = isLand()
     val top = if (land) barsTop + dp(12f) else binding.banner.height + dp(10f)
     val start = recentreStart()
-    val end = rotateEnd()
+    val end = moreEnd()
     binding.recentre.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
       if (topMargin != top || marginStart != start) {
         topMargin = top
         marginStart = start
       }
     }
-    binding.rotate.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+    binding.more.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
       if (topMargin != top || marginEnd != end) {
         topMargin = top
         marginEnd = end
       }
     }
-    val first = if (binding.notice.visibility == View.VISIBLE) binding.notice else binding.card
-    if (binding.root.height > 0 && binding.bottom.height > 0) {
-      val above = binding.root.height - (binding.bottom.top + first.top) + dp(8f)
+    placeWatch(top)
+    scopeLaidOut()
+    placeLink()
+    if (binding.root.height > 0) {
+      val first = firstNotice()
+      val above =
+          if (first != null && binding.bottom.height > 0) binding.root.height - (binding.bottom.top + first.top) + dp(8f)
+          else bandHeight() + dp(8f)
       val right = if (land) dp(14f) + barsRight else dp(16f)
       binding.coords.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
         if (bottomMargin != above || marginEnd != right) {
@@ -598,7 +626,36 @@ class MainActivity :
           marginEnd = right
         }
       }
+      // The heading pill: on the left, level with the position pill. If the two would come closer than 8 dp, it sits
+      // straight above the position pill instead (spec §5 of 15 Nov).
+      val left = dp(16f) + if (land) barsLeft else 0
+      val coordsW = if (binding.coords.visibility == View.VISIBLE) binding.coords.width.toFloat() else 0f
+      val stack = FolloRules.pillsStack((binding.root.width - left - right).toFloat(), widestHeadingPx(), coordsW, dp(8f).toFloat())
+      val hGravity = if (stack) Gravity.BOTTOM or Gravity.END else Gravity.BOTTOM or Gravity.START
+      val hBottom = if (stack) above + binding.coords.height + dp(8f) else above
+      binding.heading.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+        if (gravity != hGravity || bottomMargin != hBottom || marginStart != left || marginEnd != right) {
+          gravity = hGravity
+          bottomMargin = hBottom
+          marginStart = left
+          marginEnd = right
+        }
+      }
+      placeMenu(top, end, above)
     }
+  }
+
+  /** The first notice showing above the bottom band, if any. */
+  private fun firstNotice(): View? = listOf(binding.notice, binding.note).firstOrNull { it.visibility == View.VISIBLE }
+
+  /** The bottom band's height: its row plus the navigation bar under it. */
+  private fun bandHeight(): Int =
+      binding.creditBar.height.takeIf { it > 0 } ?: (dp(4f + 18f) + barsBottom + dp(if (isLand()) 5f else 4f))
+
+  /** The heading pill at its widest ("359°  WNW"), so it never flips between beside and above as the text changes. */
+  private fun widestHeadingPx(): Float {
+    val v = binding.heading
+    return v.paint.measureText("359°  WNW") + v.paddingStart + v.paddingEnd + v.compoundDrawablePadding + dp(16f)
   }
 
   override fun onSaveInstanceState(outState: Bundle) {
@@ -606,22 +663,18 @@ class MainActivity :
     if (::screenTurner.isInitialized) outState.putInt(TURN_KEY, screenTurner.degrees)
   }
 
-  /**
-   * The card sits straight on the bottom band: upright 8 dp above it, sideways on it. The band is as tall as its row
-   * plus the navigation bar under it.
-   */
+  /** The notices sit 8 dp above the bottom band, the whole width less 16 dp at each side (19 Nov 2026). */
   private fun applyFoot() {
     if (!::binding.isInitialized) return
     val land = isLand()
-    val band = binding.creditBar.height.takeIf { it > 0 } ?: (dp(4f + 18f) + barsBottom + dp(if (land) 5f else 4f))
-    val shadow = dp(8f)
+    val band = bandHeight()
     binding.bottom.updatePadding(
-        left = if (land) shadow else dp(16f),
-        top = if (land) shadow else dp(12f),
-        right = if (land) 0 else dp(16f),
-        bottom = band + if (land) 0 else dp(8f),
+        left = dp(16f) + if (land) barsLeft else 0,
+        right = dp(16f) + if (land) barsRight else 0,
+        bottom = band + dp(8f),
     )
     binding.offCover.updatePadding(bottom = if (land) band else 0)
+    binding.waitCover.updatePadding(bottom = if (land) band else 0)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -666,10 +719,12 @@ class MainActivity :
     folloOfflineRepo.kick()
     folloGridRepo.refresh()
     folloDrawRepo.refresh() // base camp's drawings for this phone (12 Nov 2026)
+    folloLayRepo.refresh() // the map layers (19 Nov 2026)
     // Check in every time the app comes to the front (Alex 25 Oct 2026, as on iOS): the reply brings the wake-up
     // circles for any search in the next 14 days. Since 15 Nov 2026 the service takes the fix itself and sends the
     // location-free hello anyway when none comes (or location can't be used): no waiting for the screen's fix here.
     if (preferences.setupCompleted) openCheckIn()
+    everywhereRemind()
   }
 
   // ── Power button (Alex, 13 Nov 2026; support/FolloPower) ──────────────────────────────────────────
@@ -693,6 +748,7 @@ class MainActivity :
   private fun showPower(off: Boolean) {
     if (!::map.isInitialized || shownOff == off) return
     shownOff = off
+    if (off) clean = false // Off ends the clean view
     binding.offCover.visibility = if (off) View.VISIBLE else View.GONE
     showRecentre()
     map.visibility = if (off) View.INVISIBLE else View.VISIBLE
@@ -711,6 +767,9 @@ class MainActivity :
       showCredit()
     }
     render()
+    watchStatusChanged()
+    scopeUpdate()
+    renderMenu()
   }
 
   /** A check-in waiting for a good enough fix: USER = the person's long-press (sent as is). The automatic (open)
@@ -765,8 +824,10 @@ class MainActivity :
   private fun wakeAreaOf(w: WaypointModel): String? =
       if (w.geofenceRadius > 0) FolloRules.wakeArea(w.description) else null
 
-  private fun refreshWakeAreas(all: List<WaypointModel>) {
+  private fun refreshWakeAreas(held: List<WaypointModel>) {
+    val all = held + scopeDemo // debug builds: made-up circles for the screen alone (FP055), else nothing added
     drawGeofences(all)
+    scopeCircles(all)
     val areas = all.mapNotNull(::wakeAreaOf).distinct()
     val update = FolloRules.circlesDay(all.filter { wakeAreaOf(it) != null }.map { it.description })
     if (areas != wakeAreas || update != wakeUpdate) {
@@ -815,21 +876,17 @@ class MainActivity :
     val lines = mutableListOf<Polyline>()
     for ((_, group) in circles.groupBy({ it.first }, { it.second })) {
       for (c in group) {
-        val lat = c.geofenceLatitude.value
-        val lon = c.geofenceLongitude.value
+        // FP055 (19 Nov 2026): the circle on the sphere, the very points the grey mask is cut from (FolloScope.ring), so
+        // the line lies where the mask ends and where sharing starts; it was a flat approximation up to 0.6 % out
         val r = c.geofenceRadius.toDouble()
-        val kx = 111320 * kotlin.math.cos(Math.toRadians(lat))
-        val ky = 110540.0
-        val n = (r / 8).toInt().coerceIn(72, 720)
+        val n = FolloScope.ringPoints(r)
         val pts =
-            (0 until n).map { i ->
-              val t = i * 2 * Math.PI / n
-              val p = GeoPoint(lat + r * kotlin.math.sin(t) / ky, lon + r * kotlin.math.cos(t) / kx)
+            FolloScope.ring(FolloRules.Circle(c.geofenceLatitude.value, c.geofenceLongitude.value, r), n).map { (la, lo) ->
+              val p = GeoPoint(la, lo)
               val covered =
                   group.any { o ->
                     o !== c &&
-                        kotlin.math.hypot((p.longitude - o.geofenceLongitude.value) * kx, (p.latitude - o.geofenceLatitude.value) * ky) <
-                            o.geofenceRadius - 0.5
+                        FolloRules.distanceM(la, lo, o.geofenceLatitude.value, o.geofenceLongitude.value) < o.geofenceRadius - 0.5
                   }
               p to !covered
             }
@@ -897,10 +954,81 @@ class MainActivity :
           followPaused = true
           showRecentre()
           intent.getStringExtra("follo_zoom")?.toDoubleOrNull()?.let { z -> map.controller.setZoom(z) }
-          map.mapOrientation = 0f
+          // `follo_turn` (19 Nov 2026): the map turned that many degrees, as by a two-finger twist
+          map.mapOrientation = intent.getStringExtra("follo_turn")?.toFloatOrNull() ?: 0f
           map.controller.setCenter(org.osmdroid.util.GeoPoint(it[0], it[1]))
           map.invalidate()
         }
+    // Debug builds only (18 Nov 2026): the phones-in-circles drop-down with made-up phones and searches (FolloWatchRepo)
+    if (org.owntracks.android.BuildConfig.DEBUG && intent?.getBooleanExtra("follo_watch_demo", false) == true) {
+      folloWatchRepo.demo = true
+      watchAllowed = false
+      watchStatusChanged()
+      scopeUpdate() // the demo phone is one the server names (exempt from FP055 unless Volunteer view is on)
+    }
+    // Debug builds only (FP055, 19 Nov 2026): made-up search circles for the SCREEN alone, "AA:lat,lon,r;AA:lat,lon,r;
+    // Basecamp:lat,lon,r", so the three views can be checked on the emulator away from every real search area. The
+    // sharing gate never sees them (it reads the real circles), so no position is ever sent because of them.
+    // `follo_scope_been` = "AA,BB" marks areas as been to; "-" forgets every area.
+    if (org.owntracks.android.BuildConfig.DEBUG) {
+      intent?.getStringExtra("follo_scope_been")?.let { text ->
+        if (text == "-") folloScopeRepo.clear()
+        else folloScopeRepo.merge(text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.map { it to System.currentTimeMillis() / 1000 })
+      }
+      intent?.getStringExtra("follo_scope_demo")?.let { text ->
+        scopeDemo =
+            text.split(';').mapNotNull { row ->
+              val area = row.substringBefore(':').trim()
+              val n = row.substringAfter(':', "").split(',').mapNotNull { it.trim().toDoubleOrNull() }
+              if (area.isEmpty() || n.size != 3) null
+              else
+                  WaypointModel(
+                      description = "FOLLO $area wake 1",
+                      geofenceLatitude = org.owntracks.android.location.geofencing.Latitude(n[0]),
+                      geofenceLongitude = org.owntracks.android.location.geofencing.Longitude(n[1]),
+                      geofenceRadius = n[2].toInt(),
+                  )
+            }
+        lifecycleScope.launch { refreshWakeAreas(viewModel.waypoints()) }
+      }
+    }
+    // Debug builds only (19 Nov 2026, the simple screen): `follo_lay_demo` = "AA:lat,lon,r" makes up every layer for
+    // that (made-up) search on the phone itself, nothing fetched; `follo_menu_set` sets the buttons; `follo_link_demo`
+    // = green | orange | red shows the two-way symbol that way.
+    if (org.owntracks.android.BuildConfig.DEBUG) {
+      intent?.getStringExtra("follo_lay_demo")?.let { text ->
+        val area = text.substringBefore(':').trim()
+        val n = text.substringAfter(':', "").split(',').mapNotNull { it.trim().toDoubleOrNull() }
+        if (area.isNotEmpty() && n.size == 3)
+            lifecycleScope.launch {
+              kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { FolloLayDemo.make(folloLayRepo, folloGridRepo, area, n[0], n[1], n[2]) }
+              renderMenu()
+            }
+      }
+      intent?.getStringExtra("follo_menu_set")?.let(::menuSet)
+      // 22 Nov 2026: `follo_tick_demo` = "ok,part,warn" (app, circles, map) shows the ticks that way; `follo_ghost_demo`
+      // = keep | drop shows the made-up phones with or without the one that has left; `follo_ev_demo` = offer (the row
+      // with no server; keep the emulator OFFLINE) | remind (the 12-hour pop-up now) | serveroff (as if a status
+      // element had arrived without `ev`).
+      intent?.getStringExtra("follo_tick_demo")?.let { text ->
+        tickDemo =
+            text.split(',').mapNotNull { w -> FolloRules.Tick.entries.firstOrNull { it.name.equals(w.trim(), true) } }.takeIf { it.size == 3 }
+        renderTicks()
+      }
+      intent?.getStringExtra("follo_ghost_demo")?.let {
+        ghostDemoKeep = it == "keep"
+        watchChanged()
+      }
+      when (intent?.getStringExtra("follo_ev_demo")) {
+        "offer" -> everywhereDemo = true
+        "remind" -> everywhereRemind(force = true)
+        "serveroff" -> lifecycleScope.launch { locationProcessor.onEverywhereOff(byServer = true) }
+      }
+      intent?.getStringExtra("follo_link_demo")?.let { name ->
+        folloLinkRepo.demo = FolloMenu.Link.entries.firstOrNull { it.name.equals(name, true) }
+        renderLink()
+      }
+    }
     val uri = intent?.data ?: return
     if (intent.action != Intent.ACTION_VIEW) return
     intent.data = null
@@ -927,6 +1055,7 @@ class MainActivity :
               .setPositiveButton(R.string.follo_setup_btn) { _, _ ->
                 viewModel.applySetup(link.config) {
                   Snackbar.make(binding.root, R.string.follo_setup_done, Snackbar.LENGTH_LONG).show()
+                  folloScopeRepo.clear() // FP055: the places whoever this phone was set up as before had been to are not this person's
                   // Let the server see this phone straight away (a hello: no circles held yet), then walk the permissions.
                   openCheckIn()
                   runPermissionChain()
@@ -1126,6 +1255,17 @@ class MainActivity :
     // with the remedy, instead of "No signal. N positions saved" for ever; the queue is kept and retried as on iOS.
     if (viewModel.rejected.value)
         return Banner(Kind.REJECTED, red, s(R.string.follo_rejected_title), s(R.string.follo_rejected_sub))
+    // "Share everywhere I go" (Alex, 22 Nov 2026): said for as long as the mode is on, in the sharing style
+    if (FolloEverywhere.isOn) {
+      val queued = backlog()
+      val sub =
+          when {
+            queued == 1 -> s(R.string.follo_offline_sub_one)
+            queued > 1 -> getString(R.string.follo_offline_sub, queued)
+            else -> ""
+          }
+      return Banner(Kind.SHARING, green, s(R.string.follo_everywhere_banner), sub, saysBacklog = queued > 0)
+    }
     val server =
         viewModel.folloStatus.value
             ?.takeIf { System.currentTimeMillis() - it.receivedAt < SERVER_STATUS_TTL_MS }
@@ -1235,62 +1375,124 @@ class MainActivity :
       binding.alwaysPage.visibility = alwaysVisibility
       if (alwaysVisibility == View.VISIBLE) binding.alwaysTitle.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED)
     }
-    // Power button (13 Nov 2026; on the card since 14 Nov): there once the phone is set up
-    val powerVisibility = if (b.kind == Kind.NOT_SET_UP) View.GONE else View.VISIBLE
-    if (binding.power.visibility != powerVisibility) binding.power.visibility = powerVisibility
-    binding.power.off = b.kind == Kind.OFF
-    // "No search area loaded yet…" above the card: in the standing-by states, until the circles arrive
+    // "No search area loaded yet…" above the bottom band: in the standing-by states, until the circles arrive
     val noticeVisibility = if (b.kind == Kind.STANDBY && wakeAreas.isEmpty()) View.VISIBLE else View.GONE
-    if (binding.notice.visibility != noticeVisibility) {
-      binding.notice.visibility = noticeVisibility
-      styleBottom() // sideways the card's corner is square under the notice
-    }
-
-    val tid = viewModel.trackerId
-    binding.who.text =
+    if (binding.notice.visibility != noticeVisibility) binding.notice.visibility = noticeVisibility
+    // Battery saver (field review 9 Nov 2026: Leonie Ch 55 fixes in 5 h, Heiner, Matt C, Lissa, Mitchell R, Paul, Tyrone,
+    // David S, Marie — fd.lp 1 ⇒ thin, gappy tracks even with the app exempt from battery optimisation). It is the phone's
+    // own setting, so the note says what to do and a tap opens the Battery saver page; it comes first, over the
+    // notifications note. Since 19 Nov 2026 (no card) these are notices above the bottom band.
+    batterySaverNote = b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && isPowerSaveMode()
+    everywhereNote = FolloEverywhere.serverOffNotice.value && b.kind != Kind.NOT_SET_UP
+    if (everywhereNote) everywhereNoteShown()
+    val note =
         when {
-          b.kind == Kind.NOT_SET_UP -> getString(R.string.follo_brand)
-          viewModel.displayName.isNotBlank() -> getString(R.string.follo_who, viewModel.displayName, tid)
-          else -> getString(R.string.follo_tracker, tid)
+          everywhereNote -> getString(R.string.follo_everywhere_server_off)
+          batterySaverNote -> getString(R.string.follo_battery_saver_note)
+          b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && !promptInFlight && !notificationPermissionRequester.hasPermission() ->
+              getString(R.string.follo_notif_off_note)
+          else -> ""
         }
+    if (binding.note.text.toString() != note) binding.note.text = note
+    val noteVisibility = if (note.isBlank()) View.GONE else View.VISIBLE
+    if (binding.note.visibility != noteVisibility) binding.note.visibility = noteVisibility
+    renderLink()
+    renderTicks()
+    renderCoords(b)
+    pillKind = b.kind
+    renderHeading()
+    renderMenu()
+  }
+
+  /** Who this phone is, as the card said it (now behind a tap on the two-way symbol, and in the shared check). */
+  private fun whoText(): String {
+    val tid = viewModel.trackerId
+    return when {
+      !viewModel.setupCompleted.value -> getString(R.string.follo_brand)
+      viewModel.displayName.isNotBlank() -> getString(R.string.follo_who, viewModel.displayName, tid)
+      else -> getString(R.string.follo_tracker, tid)
+    }
+  }
+
+  /** When it last sent, and what waits, as the card's second line said it. */
+  private fun lastText(): String {
     val parts = mutableListOf<String>()
     val last = viewModel.lastSentAt.value
     parts +=
         when {
           last == 0L -> getString(R.string.follo_last_none)
-          System.currentTimeMillis() - last < DateUtils.MINUTE_IN_MILLIS ->
-              getString(R.string.follo_last_sent_just_now)
+          System.currentTimeMillis() - last < DateUtils.MINUTE_IN_MILLIS -> getString(R.string.follo_last_sent_just_now)
           else ->
               getString(
                   R.string.follo_last_sent,
-                  DateUtils.getRelativeTimeSpanString(
-                      last,
-                      System.currentTimeMillis(),
-                      DateUtils.MINUTE_IN_MILLIS,
-                  ),
+                  DateUtils.getRelativeTimeSpanString(last, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS),
               )
         }
     val queued = backlog()
-    if (queued > 0 && !b.saysBacklog) parts += getString(R.string.follo_waiting, queued)
-    // No battery on the card (Alex 13 Nov 2026: "keep it on live maps"; the phone still sends it)
-    val text = parts.joinToString(" · ")
-    if (binding.last.text.toString() != text) binding.last.text = text
-    // Battery saver (field review 9 Nov 2026: Leonie Ch 55 fixes in 5 h, Heiner, Matt C, Lissa, Mitchell R, Paul, Tyrone,
-    // David S, Marie — fd.lp 1 ⇒ thin, gappy tracks even with the app exempt from battery optimisation). It is the phone's
-    // own setting, so the note says what to do and a tap opens the Battery saver page; it comes first, over the
-    // notifications note.
-    batterySaverNote = b.kind != Kind.NOT_SET_UP && b.kind != Kind.OFF && isPowerSaveMode()
-    val note =
-        when {
-          batterySaverNote -> getString(R.string.follo_battery_saver_note)
-          b.kind != Kind.NOT_SET_UP && !promptInFlight && !notificationPermissionRequester.hasPermission() ->
-              getString(R.string.follo_notif_off_note)
-          else -> ""
-        }
-    if (binding.note.text.toString() != note) binding.note.text = note
-    binding.note.visibility = if (note.isBlank()) View.GONE else View.VISIBLE
-    renderTicks()
-    renderCoords(b)
+    if (queued > 0) parts += getString(R.string.follo_waiting, queued)
+    return parts.joinToString(" · ")
+  }
+
+  // ── The compass heading pill (Cam Allport 15 Nov 2026; spec §5 of NEXT_VERSION_SPEC_20261115) ─────────────
+  private lateinit var headingDial: FolloCompassDial
+  /** The banner's kind at the last render: no pill where no position may be used (or while Off / the Always step). */
+  private var pillKind: Kind? = null
+  private var pillQueued = false
+  private var pillDrawnAt = 0L
+
+  /** At most every [PILL_MIN_MS] (~5 a second); the compass calls on every turn past its 2° dead-band. */
+  private fun schedulePill() {
+    if (!::binding.isInitialized || pillQueued) return
+    val wait = (pillDrawnAt + PILL_MIN_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+    pillQueued = true
+    binding.heading.postDelayed(
+        {
+          pillQueued = false
+          renderHeading()
+        },
+        wait,
+    )
+  }
+
+  /**
+   * "112°  ESE": the way the top of the screen as drawn points, true north (magnetic until the first fix gives the
+   * declination). Shown whenever the compass has a reading and a position may be used; none on a phone without a
+   * compass. Views are touched only when the text, the dial's degree or the calibration changes.
+   */
+  private fun renderHeading() {
+    if (!::binding.isInitialized || !::headingDial.isInitialized) return
+    pillDrawnAt = SystemClock.elapsedRealtime()
+    val h = compass.pillHeading()
+    val kind = pillKind
+    // only while the Compass button under "…" is on (19 Nov 2026)
+    val show = compassOn && h != null && kind != null && kind !in NO_POSITION_KINDS && kind != Kind.NEED_BACKGROUND && !FolloPower.isOff && !clean && scopeOwn
+    if (show && h != null) {
+      val text = FolloRules.headingText(h)
+      if (binding.heading.text.toString() != text) {
+        binding.heading.text = text
+        // the map may report from inside a layout pass, where a request for a new width is lost (13 Nov 2026)
+        binding.heading.post { binding.heading.requestLayout() }
+      }
+      headingDial.heading = FolloRules.headingDegrees(h).toFloat()
+      val poor = compass.poor()
+      val color = android.graphics.Color.argb(if (poor) POOR_ALPHA else 255, 255, 255, 255)
+      if (binding.heading.currentTextColor != color) {
+        binding.heading.setTextColor(color)
+        headingDial.alpha = if (poor) POOR_ALPHA else 255
+        binding.heading.isClickable = poor
+      }
+      val cd = getString(if (poor) R.string.follo_heading_poor_cd else R.string.follo_heading_cd, text.replace("  ", " "))
+      if (binding.heading.contentDescription != cd) binding.heading.contentDescription = cd
+    }
+    val visibility = if (show) View.VISIBLE else View.GONE
+    if (binding.heading.visibility != visibility) {
+      binding.heading.visibility = visibility
+      binding.root.post { placeOverlays() }
+    }
+  }
+
+  private fun showCalibrate() {
+    MaterialAlertDialogBuilder(this).setMessage(R.string.follo_compass_calibrate).setPositiveButton(android.R.string.ok, null).show()
   }
 
   // ── The ticks at the bottom right and the phone's own position (Alex, 14 Nov 2026) ─────────────────
@@ -1300,25 +1502,42 @@ class MainActivity :
     if (!::binding.isInitialized) return
     val now = System.currentTimeMillis()
     val st = viewModel.folloStatus.value
-    val circles = st != null && FolloRules.checkedInToday(st.receivedAt, now, java.time.ZoneId.systemDefault())
-    val saved = folloOfflineRepo.state.value is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved
-    val latest = FolloRules.isLatest(BuildConfig.VERSION_CODE.toLong(), st?.message?.latest?.android)
-    fun tick(v: android.widget.TextView, ok: Boolean) {
-      val t = if (ok) FolloRules.TICK_OK else FolloRules.TICK_WARN
-      if (v.text.toString() != t) v.text = t
+    // FP083 (Alex 22 Nov 2026): each tick has three states, good / partial (in progress) / something wrong
+    val circles =
+        FolloRules.circlesTick(
+            st != null && FolloRules.checkedInToday(st.receivedAt, now, java.time.ZoneId.systemDefault()), heldWakeCircles())
+    val off = folloOfflineRepo.state.value
+    val saved =
+        FolloRules.mapTick(
+            off is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saved,
+            off is org.owntracks.android.data.repos.FolloOfflineRepo.State.Saving,
+        )
+    val latest =
+        FolloRules.appTick(BuildConfig.VERSION_CODE.toLong(), st?.message?.latest?.android, st?.message?.latest?.aat, now / 1000)
+    val shown = tickDemo ?: listOf(latest, circles, saved) // debug builds: `follo_tick_demo`
+    fun tick(v: android.widget.TextView, t: FolloRules.Tick) {
+      if (v.text.toString() != t.sign) v.text = t.sign
     }
-    tick(binding.tickCircles, circles)
-    tick(binding.tickMap, saved)
-    tick(binding.tickApp, latest)
+    tick(binding.tickApp, shown[0])
+    tick(binding.tickCircles, shown[1])
+    tick(binding.tickMap, shown[2])
+    fun word(t: FolloRules.Tick, ok: Int, part: Int, bad: Int) =
+        getString(when (t) { FolloRules.Tick.OK -> ok; FolloRules.Tick.PART -> part; FolloRules.Tick.WARN -> bad })
     val words =
         listOf(
-                getString(if (latest) R.string.follo_tick_app_ok else R.string.follo_tick_app_bad),
-                getString(if (circles) R.string.follo_tick_circles_ok else R.string.follo_tick_circles_bad),
-                getString(if (saved) R.string.follo_tick_map_ok else R.string.follo_tick_map_bad),
+                word(shown[0], R.string.follo_tick_app_ok, R.string.follo_tick_app_part, R.string.follo_tick_app_bad),
+                word(shown[1], R.string.follo_tick_circles_ok, R.string.follo_tick_circles_part, R.string.follo_tick_circles_bad),
+                word(shown[2], R.string.follo_tick_map_ok, R.string.follo_tick_map_part, R.string.follo_tick_map_bad),
             )
             .joinToString(", ")
     binding.ticks.contentDescription = getString(R.string.follo_ticks_cd, words)
   }
+
+  /** Debug builds only (`follo_tick_demo` = "ok,part,warn": app, circles, map): the ticks as told, for screenshots. */
+  private var tickDemo: List<FolloRules.Tick>? = null
+
+  /** How many wake-up circles the phone holds (the circles tick's "partial": circles on the phone, not checked in today). */
+  private fun heldWakeCircles(): Int = lastWaypoints.count { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
 
   /** How old the screen's newest fix is (null = none). */
   private fun fixAgeMs(): Long? = viewModel.currentLocation.value?.let { System.currentTimeMillis() - it.time }
@@ -1349,7 +1568,7 @@ class MainActivity :
   private fun renderCoords(b: Banner) {
     val l = viewModel.currentLocation.value
     val stale = renderStale()
-    val show = l != null && !stale && !FolloPower.isOff && b.kind !in NO_POSITION_KINDS
+    val show = l != null && !stale && !FolloPower.isOff && b.kind !in NO_POSITION_KINDS && !clean && scopeOwn
     val visibility = if (show) View.VISIBLE else View.GONE
     if (show && l != null) {
       val text = FolloRules.coordsText(l.latitude, l.longitude)
@@ -1370,6 +1589,7 @@ class MainActivity :
   private fun shareCoords() {
     val l = viewModel.currentLocation.value ?: return
     if (FolloRules.fixIsStale(fixAgeMs())) return // never share where the phone last was as where it is
+    if (!scopeOwn) return // FP055: nor any position from outside the search area
     share(FolloRules.coordsShare(l.latitude, l.longitude), getString(R.string.follo_coords_share))
   }
 
@@ -1398,7 +1618,7 @@ class MainActivity :
         if (BuildConfig.FOLLO_BUILD > 0) "${BuildConfig.VERSION_NAME} (${BuildConfig.FOLLO_BUILD})" else BuildConfig.VERSION_NAME
     val text =
         FolloRules.checkText(
-            phone = binding.who.text.toString(),
+            phone = whoText(),
             device = device,
             os = "Android ${Build.VERSION.RELEASE}",
             statusAtMs = st?.receivedAt ?: 0L,
@@ -1415,6 +1635,9 @@ class MainActivity :
             latestCode = st?.message?.latest?.android,
             latestVersion = st?.message?.latest?.androidv,
             circlesDay = wakeUpdate?.replace('-', '.'),
+            compass = FolloRules.compassCheckLine(compass.pillHeading(), compass.isTrueNorth(), compass.accuracyDegrees()),
+            circlesHeld = heldWakeCircles(),
+            latestAtS = st?.message?.latest?.aat,
         )
     share(text, getString(R.string.follo_check_share))
   }
@@ -1431,8 +1654,11 @@ class MainActivity :
   /** The recentre button: while the map is held where it was moved by hand, and there is a map. */
   private fun showRecentre() {
     if (!::binding.isInitialized) return
-    val visibility = if (followPaused && !FolloPower.isOff) View.VISIBLE else View.GONE
-    if (binding.recentre.visibility != visibility) binding.recentre.visibility = visibility
+    val visibility = if (followPaused && !FolloPower.isOff && !clean && !scopeWaiting()) View.VISIBLE else View.GONE
+    if (binding.recentre.visibility != visibility) {
+      binding.recentre.visibility = visibility
+      binding.root.post { placeOverlays() } // the drop-down sits right of it
+    }
   }
 
   private var batterySaverNote = false
@@ -1454,6 +1680,10 @@ class MainActivity :
 
   /** The note under the card: while it says Battery saver is on, a tap opens that setting. */
   private fun onNoteClicked() {
+    if (everywhereNote) {
+      FolloEverywhere.noticeDone() // dismissed
+      return
+    }
     if (!batterySaverNote) return
     try {
       settingsLauncher.launch(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
@@ -1559,7 +1789,10 @@ class MainActivity :
           lastUpAt = e.eventTime
           lastUpX = e.x
           lastUpY = e.y
-          if (FolloRules.holdsMap(dragged, pinched, rotated, doubleTap)) followPaused = true
+          if (FolloRules.holdsMap(dragged, pinched, rotated, doubleTap)) {
+            followPaused = true
+            watchFollowing = false // the map stays where it was moved, also when it was on another phone
+          }
           if (camera == Camera.NAV) requestNavFrame() // the arrow turned to suit the held map, or back on its spot
         }
       }
@@ -1570,12 +1803,15 @@ class MainActivity :
     map.addMapListener(
         object : org.osmdroid.events.MapListener {
           override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+            scopeClamp()
             showCredit()
+            if (!scopeActive && viewArea() != menuArea) binding.root.post { renderMenu() } // an exempt phone looks anywhere
             return false
           }
 
           override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
             if (camera == Camera.NAV && !followPaused) requestNavFrame()
+            scopeClamp()
             showCredit()
             return false
           }
@@ -1605,7 +1841,8 @@ class MainActivity :
     // (9 Nov 2026, Greg G: the app opened on a George Town street, grey where the imagery stops, before his first fix)
     val known = viewModel.currentLocation.value ?: if (FolloPower.isOff(this)) null else lastKnownForMap()
     known?.let { folloOfflineRepo.notePosition(it.latitude, it.longitude) } // which areas are near enough to save (phone only)
-    if (known != null) {
+    // FP055: where search areas only are shown, the map never opens on the phone's own position (scopeUpdate places it)
+    if (known != null && !scopeOn()) {
       map.controller.setZoom(START_ZOOM) // walking scale
       map.controller.setCenter(known.toGeoPoint())
     } else {
@@ -1658,10 +1895,11 @@ class MainActivity :
    * zoom; the text is only touched when it changes.
    */
   private fun showCredit() {
-    if (FolloPower.isOff) return // no map, no credit
+    if (FolloPower.isOff || scopeCovered) return // no map, no credit
     val source = map.tileProvider.tileSource
     val text =
-        if (source is FolloTileSource) {
+        if (hillshadeShown()) getString(R.string.follo_credit_hillshade)
+        else if (source is FolloTileSource) {
           val c = map.mapCenter
           source.creditAt(c.latitude, c.longitude, org.osmdroid.util.TileSystem.getInputTileZoomLevel(map.zoomLevelDouble))
         } else source.copyrightNotice.orEmpty()
@@ -1699,7 +1937,7 @@ class MainActivity :
     PAGE, // north up: map still until the dot nears an edge, then one glide putting it at the back
     HEADING, // travel direction up, dot 3/4 down, map rotates smoothly with every turn
     HEADING_CALM, // as HEADING, but the map only turns once the direction has changed by 30 degrees
-    NAV, // like Google Maps after Start: tilted map, arrow 80 % down, arrow and map glide, map turns
+    NAV, // like Google Maps after Start: arrow at the middle of the whole screen (FP033, 16 Nov 2026), arrow and map glide, map turns
   }
 
   private var camera = Camera.NAV
@@ -1716,6 +1954,7 @@ class MainActivity :
 
   private fun followCamera(l: Location) {
     if (!::map.isInitialized || map.width == 0 || map.height == 0) return
+    if (!scopeFollows()) return // FP055: outside a search area the map is on an area, never on the phone
     if (overviewUntilFix) {
       // First fix after the overview: down to walking scale over it, following
       overviewUntilFix = false
@@ -1807,8 +2046,26 @@ class MainActivity :
    */
   private fun headingUpCentre(p: GeoPoint, down: Float, up: Float = upBearing): GeoPoint {
     val v = visible()
-    val ox = v.centerX() - map.width / 2f // dot right of the view centre by ox
-    val oy = v.top + down * v.height() - map.height / 2f // dot below the view centre by oy
+    return headingUpCentreAt(p, v.centerX(), v.top + down * v.height(), up)
+  }
+
+  /**
+   * Where the navigation arrow sits, in map-view pixels (Alex 15 Nov 2026, FP033): across, as before (upright the
+   * middle, sideways halfway between the recentre and rotate buttons); down, the middle of the WHOLE screen, whatever
+   * covers the map (banner, card, footer, status bar).
+   */
+  private fun navSpot(): android.graphics.PointF {
+    val v = visible()
+    val at = IntArray(2)
+    map.getLocationInWindow(at)
+    val screenH = window.decorView.height.toFloat().takeIf { it > 0f } ?: binding.root.height.toFloat()
+    return android.graphics.PointF(v.centerX(), FolloRules.arrowSpotY(screenH, at[1].toFloat(), map.height.toFloat()))
+  }
+
+  /** Map centre for a heading-up map with the fix at ([sx], [sy]) in map-view pixels. */
+  private fun headingUpCentreAt(p: GeoPoint, sx: Float, sy: Float, up: Float): GeoPoint {
+    val ox = sx - map.width / 2f // dot right of the view centre by ox
+    val oy = sy - map.height / 2f // dot below the view centre by oy
     val pxPerM = map.projection.metersToPixels(1f)
     return p.destinationPoint((oy / pxPerM).toDouble(), up.toDouble())
         .destinationPoint((ox / pxPerM).toDouble(), (up - 90f).toDouble())
@@ -1825,13 +2082,15 @@ class MainActivity :
       val bottom = (binding.creditBar.top - map.top).toFloat().takeIf { it > top + 1 } ?: map.height.toFloat()
       val half = dp(20f)
       val recentreX = recentreStart() + half - map.left
-      val rotateX = map.width - rotateEnd() - half
+      val rotateX = map.width - moreEnd() - half
       val mid = ((recentreX + rotateX) / 2f).coerceIn(1f, map.width.toFloat())
       android.graphics.RectF(0f, top, 2 * mid, bottom)
     } else {
       val top = (binding.banner.bottom - map.top).coerceAtLeast(0).toFloat()
-      // the top of the notice when it is shown, else of the card (both inside `bottom`, under its top padding)
-      val bottom = (binding.bottom.top + binding.bottom.paddingTop - map.top).toFloat().takeIf { it > top } ?: map.height.toFloat()
+      // down to the first notice when one shows, else to the bottom band (19 Nov 2026: no card)
+      val band = (binding.creditBar.top - map.top).toFloat().takeIf { it > top + 1 } ?: map.height.toFloat()
+      val first = if (clean) null else firstNotice()
+      val bottom = first?.let { (binding.bottom.top + it.top - map.top).toFloat().takeIf { y -> y > top } } ?: band
       android.graphics.RectF(0f, top, map.width.toFloat(), bottom)
     }
   }
@@ -1851,6 +2110,7 @@ class MainActivity :
           navArrow =
               Marker(map).apply {
                 id = "nav-arrow"
+                isEnabled = ownShown()
                 icon = ResourcesCompat.getDrawable(resources, navArrowIcon(shownStale == true), null)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 infoWindow = null
@@ -1858,7 +2118,7 @@ class MainActivity :
       navArrow?.let { if (it !in map.overlays) map.overlays.add(it) }
       scaleBar?.let { map.overlays.remove(it) }
       // Alex 21 Oct 2026: no tilt. A flat, top-down map that turns with you; the arrow's spot is
-      // 80 % of the way down the visible map (headingUpCentre), the same on iOS.
+      // the middle of the whole screen since 16 Nov 2026 (FP033, navSpot), the same on iOS.
       map.rotationX = 0f
       map.scaleX = 1f
       map.scaleY = 1f
@@ -1937,8 +2197,8 @@ class MainActivity :
   }
 
   // ── NAV camera: one frame loop for position and heading ─────────────────────────────────
-  // Alex 21 Oct 2026: the map turns with the COMPASS (the way the phone points), the arrow stays pointing up at 80 %
-  // down the visible map, centred sideways. Without a compass reading the walking direction turns it instead.
+  // Alex 21 Oct 2026: the map turns with the COMPASS (the way the phone points), the arrow stays pointing up (since
+  // 16 Nov 2026 at the middle of the whole screen, navSpot; was 80 % down the visible map), centred sideways. Without a compass reading the walking direction turns it instead.
   private var navFrom: GeoPoint? = null
   private var navTo: GeoPoint? = null
   private var navGlideStart = 0L
@@ -2008,12 +2268,13 @@ class MainActivity :
     }
     val gliding = navGlideMs > 0L && now < navGlideStart + navGlideMs
     val arrow = navArrow
-    if (!followPaused && !gestureActive) {
+    if (!followPaused && !gestureActive && scopeFollows()) {
       val pos = navPosition(now)
       if (pos != null) {
         upBearing = shownHeading
         map.mapOrientation = -shownHeading
-        map.controller.setCenter(headingUpCentre(pos, if (isLand()) LAND_DOWN else NAV_DOWN, shownHeading))
+        val spot = navSpot() // FP033: the middle of the whole screen, top to bottom
+        map.controller.setCenter(headingUpCentreAt(pos, spot.x, spot.y, shownHeading))
         arrow?.position = pos
         arrow?.rotation = 0f
         shownT = navTimeAt(now)
@@ -2078,6 +2339,8 @@ class MainActivity :
   /** The recentre button or a banner tap: follow again, heading-up, at walking scale, with the arrow back on its spot. */
   private fun recentre() {
     if (FolloPower.isOff) return // no map to recentre
+    if (watchRecentre()) return // the map is on another phone or a search (FolloWatch): back to that
+    if (scopeRecentre()) return // FP055: not in a search area = back to the framed view of the last one
     followPaused = false
     if (camera == Camera.NAV) requestNavFrame() // the compass turns the map back even before the next fix
     val l = viewModel.currentLocation.value ?: return
@@ -2245,6 +2508,7 @@ class MainActivity :
       Polyline(map).apply {
         id = TRACK_ID
         infoWindow = null
+        isEnabled = ownShown() // hidden in the clean view (18 Nov 2026), and wherever FP055 shows nothing of this phone
         setPoints(points)
         outlinePaint.color = getColor(R.color.follo_track)
         outlinePaint.strokeWidth = resources.displayMetrics.density * 4
@@ -2253,15 +2517,52 @@ class MainActivity :
       }
 
   /**
+   * Walking-only (FP079, 22 Nov 2026; rules FolloWalk, the live map's of 11 Nov): the track's points go through this one
+   * at a time; only pieces that are walking are drawn (driving, GPS spikes and the straight line after a silent gap are
+   * not). Display only: every point stays in FolloTrackRepo.
+   */
+  private var trackWalker = FolloWalk.Walker()
+
+  private fun trackFix(p: org.owntracks.android.data.repos.FolloTrackRepo.Point) = FolloWalk.Fix(p.t / 1000.0, p.lat, p.lon)
+
+  private fun trackAt(): Int = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
+
+  private fun trackLineOf(points: List<FolloWalk.Fix>) = trackLine(points.map { GeoPoint(it.lat, it.lon) })
+
+  /**
+   * The newest piece of the track on the map exactly while the rule says it is drawn: there once it has proved itself
+   * (3 fixes over 15 s), gone again when it is under a minute long and its last fix is over a minute old. True when
+   * the map changed.
+   */
+  private fun syncTrackTail(): Boolean {
+    if (!::map.isInitialized) return false
+    val open = trackWalker.open
+    val want = open != null && open.drawnOpen(System.currentTimeMillis() / 1000.0)
+    val tail = trackTail
+    if (want && tail == null) {
+      trackTail = trackLineOf(open!!.points).also { map.overlays.add(trackAt(), it) }
+      return true
+    }
+    if (!want && tail != null) {
+      map.overlays.remove(tail)
+      trackTail = null
+      drawTrackToArrow()
+      return true
+    }
+    return false
+  }
+
+  /**
    * The phone's own walking track: magenta like QField tracklogs, above the area, below the pair line. Each fix is
    * appended to the current line; the whole track is rebuilt only on load, clear, trim or after missed updates
    * (review 21 Oct 2026: a full rebuild per fix stuttered after hours of walking). A point newer than where the arrow
    * has glided to waits in [trackHeld] until the arrow passes it (5 Nov 2026), so the line never runs ahead of it.
+   * Since 22 Nov 2026 only the walking is drawn ([trackWalker]).
    */
   private fun drawTrack(u: org.owntracks.android.data.repos.FolloTrackRepo.Update) {
     if (!::map.isInitialized || u.serial == drawnTrackSerial) return
     val incremental =
-        !u.reset && u.last != null && u.serial == drawnTrackSerial + 1 && (trackTail != null || trackHeld.isNotEmpty())
+        !u.reset && u.last != null && u.serial == drawnTrackSerial + 1 && (trackLastDrawn != null || trackHeld.isNotEmpty())
     drawnTrackSerial = u.serial
     if (incremental) {
       trackHeld.addLast(u.last!! to u.newSegment)
@@ -2273,29 +2574,32 @@ class MainActivity :
     trackTail = null
     trackToArrow = null
     trackHeld.clear()
-    val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
+    trackLastDrawn = null
+    trackWalker = FolloWalk.Walker()
+    val at = trackAt()
     val all = viewModel.trackSnapshot()
     // Only up to where the arrow is; the rest waits for it
     val reached = trackReachedT()
-    val shown = all.takeWhile { it.t <= reached }
+    val ended = mutableListOf<List<FolloWalk.Fix>>()
     val d = FloatArray(1)
-    for (i in shown.size until all.size) {
+    var held = false
+    for (i in all.indices) {
       val q = all.getOrNull(i - 1)
       val p = all[i]
       val newSegment =
           q != null &&
               org.owntracks.android.data.repos.FolloTrackRepo.isBreak(
                   p.t - q.t, d.also { Location.distanceBetween(q.lat, q.lon, p.lat, p.lon, it) }[0])
-      trackHeld.addLast(p to newSegment)
+      if (!held && p.t <= reached) {
+        trackWalker.add(trackFix(p), newSegment).ended?.let { if (it.drawnEnded) ended += it.points }
+        trackLastDrawn = p
+      } else {
+        held = true
+        trackHeld.addLast(p to newSegment)
+      }
     }
-    trackLastDrawn = shown.lastOrNull()
-    val segments = viewModel.trackSegments(shown)
-    segments.reversed().forEach { seg -> map.overlays.add(at, trackLine(seg.map { GeoPoint(it.lat, it.lon) })) }
-    // The tail is the last segment, or a fresh one-point line when the newest point stands alone
-    val lastSeg = segments.lastOrNull()
-    trackTail =
-        if (lastSeg != null && lastSeg.last() == shown.lastOrNull()) map.overlays.filterIsInstance<Polyline>().last { it.id == TRACK_ID }
-        else shown.lastOrNull()?.let { trackLine(listOf(GeoPoint(it.lat, it.lon))).also { l -> map.overlays.add(at, l) } }
+    ended.reversed().forEach { piece -> map.overlays.add(at, trackLineOf(piece)) }
+    syncTrackTail()
     drawTrackToArrow()
     map.invalidate()
   }
@@ -2309,26 +2613,35 @@ class MainActivity :
     val reached = trackReachedT()
     while (trackHeld.isNotEmpty() && trackHeld.first().first.t <= reached) {
       val (lp, newSegment) = trackHeld.removeFirst()
-      val p = GeoPoint(lp.lat, lp.lon)
-      val tail = trackTail
-      if (newSegment || tail == null) {
-        val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
-        trackTail = trackLine(listOf(p)).also { map.overlays.add(at, it) }
-      } else tail.addPoint(p)
+      val step = trackWalker.add(trackFix(lp), newSegment)
+      if (step.skipped) continue
+      if (step.joined) {
+        trackTail?.addPoint(GeoPoint(lp.lat, lp.lon)) // not on the map yet: syncTrackTail puts the whole piece there
+      } else {
+        // the piece before this fix is over: it stays if it was a walk of a minute or more, else it comes off again
+        val was = step.ended
+        val tail = trackTail
+        if (was != null && was.drawnEnded) {
+          if (tail == null) map.overlays.add(trackAt(), trackLineOf(was.points))
+        } else if (tail != null) map.overlays.remove(tail)
+        trackTail = null
+      }
       trackLastDrawn = lp
     }
+    syncTrackTail()
     drawTrackToArrow()
   }
 
   /**
    * The line from the newest drawn track point to the arrow, while the arrow heads for a point not drawn yet. None
-   * across a break in the track (the held point starts a new segment) or when there is no arrow.
+   * across a break in the track (the held point starts a new segment, or would not join the walk) or when there is no
+   * arrow, or while the newest piece is not on the map.
    */
   private fun drawTrackToArrow() {
     val last = trackLastDrawn
     val held = trackHeld.firstOrNull()
     val arrow = navArrow?.position?.takeIf { navOn && shownT > 0L && it.latitude != 0.0 }
-    if (last == null || held == null || held.second || arrow == null) {
+    if (last == null || held == null || held.second || arrow == null || trackTail == null || !trackWalker.wouldJoin(trackFix(held.first))) {
       trackToArrow?.let { map.overlays.remove(it) }
       trackToArrow = null
       return
@@ -2337,8 +2650,7 @@ class MainActivity :
     val line = trackToArrow
     if (line != null) line.setPoints(ends)
     else {
-      val at = map.overlays.indexOfLast { isAreaLayer(it) || it === gridOverlay || it === drawOverlay } + 1
-      trackToArrow = trackLine(ends).also { map.overlays.add(at, it) }
+      trackToArrow = trackLine(ends).also { map.overlays.add(trackAt(), it) }
     }
   }
 
@@ -2357,18 +2669,51 @@ class MainActivity :
   private fun isFresh(contact: Contact): Boolean =
       contact.latLng != null && FolloRules.leaderFresh(contact.locationTimestamp, System.currentTimeMillis() / 1000)
 
-  private fun showIfLeader(contact: Contact) {
-    if (contact.id in shownTopics()) updateContactMarker(contact)
+  /**
+   * Ghost dots (FP079, a coordinator 21 Nov 2026): a team-mate whose newest fix is 30 s old or more and lies within 30 m of the
+   * edge of the held circles has LEFT the search (phones post only inside, so nothing replaces that fix): not drawn,
+   * no pair line to them, until their next fix.
+   */
+  private fun hasLeft(contact: Contact): Boolean {
+    val at = contact.latLng ?: return false
+    return FolloRules.hasLeft(
+        System.currentTimeMillis() / 1000 - contact.locationTimestamp,
+        FolloRules.dotDepthM(at.latitude.value, at.longitude.value, null, scopeAreas),
+    )
   }
 
-  /** Markers for the team's leaders only; anyone else (other teammates, other teams) is taken off the map. */
+  /** On the map: heard from in the last 10 minutes and not left. */
+  private fun isShown(contact: Contact): Boolean = isFresh(contact) && !hasLeft(contact)
+
+  /** This phone's team-mates as dots (FP078), and the phones in search circles on a phone that may see them. */
+  private var contactDots: List<FolloDots.Dot> = emptyList()
+  private var contactUsers: List<String> = emptyList()
+  private var watchDots: List<FolloDots.Dot> = emptyList()
+  private var watchUsers: Set<String> = emptySet()
+
+  /** Both kinds of dot to the top overlay; a person in both lists is drawn once (as the phones-in-circles list has them). */
+  private fun pushDots() {
+    val top = watchTopOverlay ?: return
+    top.dots = watchDots + contactDots.filterIndexed { i, _ -> contactUsers.getOrNull(i) !in watchUsers }
+    map.invalidate()
+  }
+
+  /**
+   * The team's dots (the server's `show` list: a leader sees the whole team, a member the leaders); anyone else, anyone
+   * not heard from for 10 minutes and anyone who has left is not on the map. Called on every change and every 15 s.
+   */
   private fun syncContactMarkers() {
     if (!::map.isInitialized) return
-    val keep = shownTopics().filter { viewModel.allContacts[it]?.let(::isFresh) == true }.toSet()
-    val removed =
-        map.overlays.removeAll { it is Marker && it.id.startsWith(CONTACT_PREFIX) && it.id.removePrefix(CONTACT_PREFIX) !in keep }
-    viewModel.allContacts.values.filter { it.id in keep }.forEach(::updateContactMarker)
-    if (removed) map.invalidate()
+    val shown = shownTopics().mapNotNull { viewModel.allContacts[it] }.filter(::isShown)
+    val dots =
+        shown.map { c ->
+          FolloDots.Dot(c.latLng!!.latitude.value, c.latLng!!.longitude.value, c.trackerId, FolloRules.dotColour(c.teamColour), c.vest)
+        }
+    if (dots == contactDots) return
+    contactDots = dots
+    // "owntracks/<user>/phone": the user, to tell a team-mate who is also in the phones-in-circles list
+    contactUsers = shown.map { c -> c.id.split('/').getOrElse(1) { c.id } }
+    pushDots()
   }
 
   /** Where this phone is drawn: the arrow while it is on the map (NAV), else the latest fix. */
@@ -2389,7 +2734,7 @@ class MainActivity :
     if (!::map.isInitialized) return
     val two = leaders().takeIf { it.size == 2 }
     fun partner(ld: org.owntracks.android.model.messages.FolloLeader): GeoPoint? =
-        viewModel.allContacts[ld.topic!!]?.takeIf(::isFresh)?.latLng?.let { GeoPoint(it.latitude.value, it.longitude.value) }
+        viewModel.allContacts[ld.topic!!]?.takeIf(::isShown)?.latLng?.let { GeoPoint(it.latitude.value, it.longitude.value) }
     val ends = two?.map { ld -> if (ld.isSelf) ownDrawnPosition() else partner(ld) }
     val fix = (viewModel.currentLocation.value ?: viewModel.lastPublished.value)?.let { GeoPoint(it.latitude, it.longitude) }
     val measured = two?.map { ld -> if (ld.isSelf) fix ?: ownDrawnPosition() else partner(ld) }
@@ -2493,50 +2838,1242 @@ class MainActivity :
     map.invalidate()
   }
 
-  /** Other people's dots are half the size of the cached 48 dp picture (Alex, 2 Nov 2026). */
-  private fun contactIcon(bitmap: android.graphics.Bitmap) =
-      bitmap.scale((bitmap.width / 2).coerceAtLeast(1), (bitmap.height / 2).coerceAtLeast(1)).toDrawable(resources)
+  // ── Search areas only (FP055, Alex 19 Nov 2026; rules in FolloScope, contract docs/FP055_SPEC_20261119.md) ────────────
+  // "It needs to only work within the search area, and must not give the false impression that it does anything
+  // outside. Loophole to fix: 'you can see my house', also in screenshots people send to show it's working."
+  // LIVE (inside a held search area): as before, under the grey mask and within the area's limits. LAST (not in one,
+  // but has been to one): that area's map, north up, nothing of this phone on it. WAITING (been to none): no map.
+  // An exempt phone (status `all: 1`) is untouched unless its "Volunteer view" is on. No location request is added.
 
-  private fun updateContactMarker(contact: Contact) {
-    val latLng = contact.latLng ?: return
-    if (!isFresh(contact)) return
-    val point = GeoPoint(latLng.latitude.value, latLng.longitude.value)
-    lifecycleScope.launch {
-      val bitmap = contactImageBindingAdapter.getBitmapFromCache(contact)
-      val id = CONTACT_PREFIX + contact.id
-      if (contact.id !in shownTopics() || !isFresh(contact)) return@launch // the status changed while the picture loaded
-      val existing = map.overlays.firstOrNull { it is Marker && it.id == id } as Marker?
-      if (existing != null) {
-        // Every reply repeats the teammates (5 s in Move): touch the marker only when it really moved or
-        // its picture changed, or it blinks.
-        val moved = existing.position.latitude != point.latitude || existing.position.longitude != point.longitude
-        val newPicture = existing.relatedObject !== bitmap
-        if (!moved && !newPicture) return@launch
-        if (moved) existing.position = point
-        if (newPicture) {
-          existing.icon = contactIcon(bitmap)
-          existing.relatedObject = bitmap
+  private var maskOverlay: FolloMaskOverlay? = null
+  /** The held circles by search area (a Basecamp circle with its nearest area). */
+  private var scopeAreas: Map<String, List<FolloRules.Circle>> = emptyMap()
+  /** The held circles have been read once (until then the map stays covered). */
+  private var scopeLoaded = false
+  /** FP055 applies to this phone right now (set up, not Off, not exempt or in Volunteer view). */
+  private var scopeActive = false
+  /** What the screen is on; null while FP055 does not apply, or before the circles are read. */
+  private var scopeState: FolloScope.State? = null
+  /** Whether anything of this phone's own position may be on the screen (arrow, track, coordinates, heading). */
+  private var scopeOwn = true
+  /** The map is hidden behind the grey panel: WAITING, or not yet known what to show. */
+  private var scopeCovered = false
+  /** What the mask, the frame and the limits were last set from. */
+  private var scopeKey = "-"
+  /** Frame(V): the box the map is kept to; null = no limits. */
+  private var scopeFrame: FolloScope.Box? = null
+  private var scopeClamping = false
+  /** The visible map the limits were last worked out for. */
+  private var scopeLaidOutFor = ""
+  /** Debug builds only: made-up circles for the screen alone (handleIntent `follo_scope_demo`). */
+  private var scopeDemo: List<WaypointModel> = emptyList()
+  private val scopeRecheck = Runnable { scopeUpdate() }
+
+  /** Whether FP055 applies: set up, not Off, and not an exempt phone with Volunteer view off. */
+  private fun scopeOn(): Boolean {
+    if (!preferences.setupCompleted || FolloPower.isOff(this)) return false
+    // "Share everywhere I go" (Alex 22 Nov 2026: "This turns off the greying out"): as an exempt phone's "My location"
+    if (FolloEverywhere.isOn) return false
+    val all = if (folloWatchRepo.demo) 1 else viewModel.folloStatus.value?.message?.all
+    return FolloScope.applies(all, folloScopeRepo.volunteerView)
+  }
+
+  /** The camera may follow this phone: FP055 does not apply, or the phone is in a search area. */
+  private fun scopeFollows(): Boolean = !scopeActive || scopeState?.view?.mode == FolloScope.Mode.LIVE
+
+  /** No map at all (WAITING, or still working out what to show). */
+  private fun scopeWaiting(): Boolean = scopeCovered
+
+  /** This phone's own arrow and track: hidden in the clean view, and wherever FP055 shows nothing of this phone. */
+  private fun ownShown(): Boolean = !clean && scopeOwn
+
+  private fun showOwn() {
+    if (!::map.isInitialized) return
+    val shown = ownShown()
+    navArrow?.isEnabled = shown
+    myLocationOverlay?.isEnabled = shown
+    map.overlays.forEach { if (it is Polyline && it.id == TRACK_ID) it.isEnabled = shown }
+    map.invalidate()
+  }
+
+  /** onCreate: the mask goes above every line layer (they are all added below it by index) and under the pins. */
+  private fun buildScope() {
+    maskOverlay =
+        FolloMaskOverlay(resources.displayMetrics.density, getColor(R.color.follo_area)).also { m ->
+          val at = map.overlays.indexOfFirst { it is Marker || it === watchTopOverlay || it === myLocationOverlay || it is ScaleBarOverlay }
+          map.overlays.add(if (at >= 0) at else map.overlays.size, m)
         }
-      } else if (!isDestroyed) {
-        map.overlays.add(
-            Marker(map).apply {
-              this.id = id
-              position = point
-              icon = contactIcon(bitmap)
-              relatedObject = bitmap
-              title = contact.displayName
-              setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-              infoWindow = null
-            },
+    scopeUpdate()
+  }
+
+  /** The held circles changed (or were read for the first time). */
+  private fun scopeCircles(all: List<WaypointModel>) {
+    scopeAreas =
+        FolloScope.areas(
+            all.filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }.map {
+              FolloRules.Circle(it.geofenceLatitude.value, it.geofenceLongitude.value, it.geofenceRadius.toDouble(), FolloRules.wakeArea(it.description).orEmpty())
+            }
         )
-        keepOwnOnTop()
+    scopeLoaded = true
+    scopeUpdate()
+  }
+
+  /**
+   * Which view (spec §3): on every fix, every change of the circles, every status element, coming to the front, the
+   * power button, and when the flap guard's 10 s are up. Uses only the fix the screen already has.
+   */
+  private fun scopeUpdate() {
+    if (!::map.isInitialized || !::binding.isInitialized || maskOverlay == null) return
+    binding.root.removeCallbacks(scopeRecheck)
+    val active = scopeOn()
+    var state: FolloScope.State? = null
+    var own = !active
+    if (active && scopeLoaded) {
+      val l = viewModel.currentLocation.value?.takeIf { !FolloRules.fixIsStale(System.currentTimeMillis() - it.time) }
+      // a fresh fix too rough to say where the phone is (the app's own 100 m rule) decides nothing either way
+      val rough = l != null && !(l.hasAccuracy() && l.accuracy < CHECK_IN_MAX_ACC_M)
+      val prev = scopeState.takeIf { scopeActive }
+      if (rough && prev?.view?.mode == FolloScope.Mode.LIVE && prev.view.area in scopeAreas) {
+        state = prev
+        own = scopeOwn
+      } else {
+        val fix = l?.takeIf { !rough }?.let { FolloScope.Fix(it.latitude, it.longitude) }
+        fix?.let { folloScopeRepo.note(it.lat, it.lon, scopeAreas) } // been to: kept on the phone, never sent
+        val now = SystemClock.elapsedRealtime()
+        var st = FolloScope.step(prev, scopeAreas, folloScopeRepo.been.value, fix, now)
+        // A search chosen in the drop-down (19 Nov 2026, spec §7): its LAST view, until a fix inside a held area
+        if (st.view.mode == FolloScope.Mode.LIVE) scopeChosen = null
+        else scopeChosen?.let { ch -> if (ch in scopeAreas) st = FolloScope.State(FolloScope.View(FolloScope.Mode.LAST, ch)) else scopeChosen = null }
+        state = st
+        own = FolloScope.showsOwn(st, scopeAreas, fix)
+        st.outsideSinceMs?.let { binding.root.postDelayed(scopeRecheck, (it + FolloScope.LEAVE_AFTER_MS - now).coerceAtLeast(50L)) }
+      }
+    }
+    scopeApply(active, state, own)
+  }
+
+  private fun scopeApply(active: Boolean, state: FolloScope.State?, own: Boolean) {
+    val was = scopeState?.view.takeIf { scopeActive }
+    val wasActive = scopeActive
+    scopeActive = active
+    scopeState = state
+    val view = state?.view
+    val circles = view?.area?.let { scopeAreas[it] }.orEmpty()
+    val covered = active && (view == null || view.mode == FolloScope.Mode.WAITING || circles.isEmpty())
+    val key = if (!active) "" else "${view?.mode}:${view?.area}:" + circles.joinToString(";") { "${it.lat},${it.lon},${it.r}" }
+    if (key != scopeKey) {
+      scopeKey = key
+      scopeCovered = covered
+      maskOverlay?.rings =
+          if (!active || covered) emptyList()
+          else circles.map { c -> FolloScope.ring(c, FolloScope.ringPoints(c.r)).flatMap { listOf(it.first, it.second) }.toDoubleArray() }
+      scopeFrame = if (!active || covered) null else FolloScope.bbox(circles)?.let(FolloScope::frame)
+      // WAITING: no map at all (hidden, so no tiles are asked for), only the words; they come once it is known that
+      // the phone has been to none of its areas (before the circles are read the panel is bare)
+      binding.waitCover.visibility = if (covered) View.VISIBLE else View.GONE
+      binding.waitText.visibility = if (covered && view != null) View.VISIBLE else View.INVISIBLE
+      if (!FolloPower.isOff) map.visibility = if (covered) View.INVISIBLE else View.VISIBLE
+      if (covered) binding.credit.visibility = View.INVISIBLE else showCredit()
+      renderMenu()
+      showRecentre()
+      scopeLaidOutFor = ""
+      scopeLimits()
+      when {
+        !active -> {
+          // FP055 no longer applies (Volunteer view switched off, or the server now names this phone): as before
+          if (wasActive && !FolloPower.isOff && watchTarget == null) {
+            followPaused = false
+            camRef = null
+            centredOnce = false
+            viewModel.currentLocation.value?.let {
+              if (map.zoomLevelDouble != START_ZOOM) map.controller.setZoom(START_ZOOM)
+              map.controller.setCenter(it.toGeoPoint())
+              followCamera(it)
+            }
+          }
+        }
+        covered -> camAnim?.cancel()
+        view?.mode == FolloScope.Mode.LAST -> scopeHome() // the area's home view, also when its circles changed
+        view?.mode == FolloScope.Mode.LIVE ->
+            if (was?.mode != FolloScope.Mode.LIVE) {
+              // arrived (or opened inside): follow at walking scale, as the app always has inside a search
+              overviewUntilFix = false
+              followPaused = false
+              camRef = null
+              centredOnce = false
+              if (map.zoomLevelDouble != START_ZOOM) map.controller.setZoom(START_ZOOM)
+              viewModel.currentLocation.value?.let {
+                map.controller.setCenter(it.toGeoPoint())
+                followCamera(it)
+              }
+            }
       }
       map.invalidate()
     }
+    if (own != scopeOwn) {
+      scopeOwn = own
+      showOwn()
+      render() // the two pills
+    }
+    if (viewArea() != menuArea) renderMenu() // other layers, another title on the drop-down
   }
+
+  /** The zoom at which Frame(V) just fits the visible map, north up; never deeper than walking scale. */
+  private fun scopeFitZoom(f: FolloScope.Box): Double? {
+    if (map.width == 0 || map.height == 0) return null
+    val p = map.projection
+    val w = abs(p.getLongPixelXFromLongitude(f.east) - p.getLongPixelXFromLongitude(f.west)).toDouble()
+    val h = abs(p.getLongPixelYFromLatitude(f.south) - p.getLongPixelYFromLatitude(f.north)).toDouble()
+    val v = visible()
+    if (v.width() <= 0f || v.height() <= 0f) return null
+    return FolloWatch.fitZoom(map.zoomLevelDouble, w, h, v.width().toDouble(), v.height().toDouble(), 1.0, SCOPE_FREE_MIN_ZOOM, START_ZOOM)
+  }
+
+  /** §6: zooming out stops where Frame(V) just fits the visible map (the LAST home view); no area = as it always was. */
+  private fun scopeLimits() {
+    val min = scopeFrame?.let(::scopeFitZoom) ?: if (scopeFrame == null) SCOPE_FREE_MIN_ZOOM else return
+    if (abs(map.minZoomLevel - min) > 0.001) map.minZoomLevel = min
+    if (scopeFrame != null && map.zoomLevelDouble < min - 0.001) map.controller.setZoom(min)
+  }
+
+  /** The LAST home view: V north up, Frame(V) fitted to the visible map; not held, so the recentre button is away. */
+  private fun scopeHome() {
+    val f = scopeFrame ?: return
+    val zoom = scopeFitZoom(f)
+    if (zoom == null) {
+      map.post { if (scopeState?.view?.mode == FolloScope.Mode.LAST && !followPaused) scopeHome() }
+      return
+    }
+    camAnim?.cancel()
+    map.scroller.forceFinished(true)
+    watchPlace(f.midLat, f.midLon, zoom, animate = false, hold = false)
+  }
+
+  /** placeOverlays: the visible map changed size (the banner's words, the notice, the screen turned): limits again. */
+  private fun scopeLaidOut() {
+    if (!::map.isInitialized || scopeFrame == null || map.width == 0) return
+    val v = visible()
+    val now = "${map.width}x${map.height}:${v.left},${v.top},${v.right},${v.bottom}"
+    if (now == scopeLaidOutFor) return
+    scopeLaidOutFor = now
+    scopeLimits()
+    if (scopeState?.view?.mode == FolloScope.Mode.LAST && !followPaused && !gestureActive) scopeHome()
+  }
+
+  /**
+   * §6: the middle of the visible map stays inside Frame(V), however the map is turned. The LIVE follow camera is left
+   * alone (the phone is inside the area anyway): there the limit holds only while the map is held by hand.
+   */
+  private fun scopeClamp() {
+    val f = scopeFrame ?: return
+    if (scopeClamping || !scopeActive || map.width == 0) return
+    if (scopeState?.view?.mode == FolloScope.Mode.LIVE && !followPaused) return
+    val pxPerM = map.projection.metersToPixels(1f).toDouble()
+    if (!(pxPerM > 0) || !pxPerM.isFinite()) return
+    val v = visible()
+    val ox = v.centerX() - map.width / 2f
+    val oy = v.centerY() - map.height / 2f
+    val up = -map.mapOrientation.toDouble() // the bearing at the top of the screen
+    val c = map.mapCenter
+    // the place at the middle of the visible map (headingUpCentreAt the other way round)
+    val mid = GeoPoint(c.latitude, c.longitude).destinationPoint(oy / pxPerM, up + 180.0).destinationPoint(ox / pxPerM, up + 90.0)
+    if (f.contains(mid.latitude, mid.longitude)) return
+    val (la, lo) = f.clamp(mid.latitude, mid.longitude)
+    scopeClamping = true
+    map.scroller.forceFinished(true) // a fling ends at the edge
+    map.controller.setCenter(GeoPoint(c.latitude + la - mid.latitude, c.longitude + lo - mid.longitude))
+    scopeClamping = false
+  }
+
+  /** recentre(): not in a search area = back to the framed view of the last one (true = done). */
+  private fun scopeRecentre(): Boolean {
+    if (!scopeActive) return false
+    return when (scopeState?.view?.mode) {
+      FolloScope.Mode.LIVE -> false // follow again, as always
+      FolloScope.Mode.LAST -> {
+        followPaused = false
+        scopeHome()
+        true
+      }
+      else -> true // no map
+    }
+  }
+
+  /** The drop-down's "Volunteer view" row (exempt phones, §7): this phone as any volunteer's phone shows it. */
+  private fun setVolunteerView(on: Boolean) {
+    if (folloScopeRepo.volunteerView == on) return
+    folloScopeRepo.volunteerView = on
+    if (on) {
+      clean = false
+      watchTarget = null
+      watchFollowing = false
+      watchFramed = null
+    }
+    scopeUpdate()
+    watchChanged() // the other phones' dots and lines go (or come back, and the map goes to what was chosen)
+    watchTitle()
+  }
+
+  // ── Every phone in a search circle + every live-map search (FolloWatch; iOS 13 Nov, Android 18 Nov 2026) ───────────
+  // Alex: "make it so I can always see any phone in a search circle anywhere in Australia … a drop down of all phones in
+  // the search circles at the moment that if I select someone, it centres on them … defaults to most recent if I haven't
+  // selected someone"; 18 Nov: "On my iphone and my 'FOLLO Tester' Samsung only, update the drop down to include all
+  // the live map searches, even if no one is in them". Shown only on a phone whose status carries `all: 1`.
+
+  /** The server's word that this phone may see every phone (status `all`), and it is set up. */
+  private var watchAllowed = false
+  private var watchChoice: FolloWatch.Choice = FolloWatch.Choice.Auto
+  /** What the map is on (null = this phone's own position) */
+  private var watchTarget: FolloWatch.Target? = null
+  /** The map keeps [watchTarget] in view until it is moved by hand */
+  private var watchFollowing = false
+  /** The search the map has been framed on since it was chosen (framed once its box is known) */
+  private var watchFramed: String? = null
+  private lateinit var watchButton: android.widget.TextView
+  private var watchLogOverlay: FolloWatchOverlay? = null
+  private var watchTopOverlay: FolloWatchOverlay? = null
+  /** Per phone: what its line was drawn from, and the pieces */
+  private val watchPieces = mutableMapOf<String, Pair<String, List<DoubleArray>>>()
+
+  /**
+   * The clean view (Alex 18 Nov 2026): "if I long press the top banner [it] hides the display of: location arrow,
+   * magenta tracks, rotation button, re-centre, card, coordinates, compass. Tapping the top banner shows the above
+   * again." Since 19 Nov 2026 it hides the "…" button and its column too. Then: "I need to see other people's tracklogs, just not mine" ⇒ only this phone's own track hides.
+   * Not kept over a restart; Off ends it.
+   */
+  private var clean = false
+    set(value) {
+      if (field == value) return
+      field = value
+      applyClean()
+    }
+
+  private fun applyClean() {
+    if (!::binding.isInitialized) return
+    val shown = !clean
+    binding.bottom.visibility = if (clean) View.INVISIBLE else View.VISIBLE
+    renderMenu()
+    showOwn()
+    // other phones' tracklogs (watchLogOverlay) STAY: Alex 18 Nov 2026 "I need to see other people's tracklogs, just not mine"
+    showRecentre()
+    render() // the two pills
+    binding.root.post { placeOverlays() }
+    if (camera == Camera.NAV && !followPaused) requestNavFrame() // the visible map is taller without the card
+    map.invalidate()
+  }
+
+  /** onCreate: the drop-down (hidden until the server says this phone may) and the two layers it draws in. */
+  private fun buildWatch() {
+    val d = resources.displayMetrics.density
+    watchButton =
+        android.widget.TextView(this).apply {
+          background =
+              android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.argb(184, 0, 0, 0))
+                cornerRadius = 20f * d
+              }
+          setTextColor(Color.WHITE)
+          textSize = 15f
+          typeface = android.graphics.Typeface.DEFAULT_BOLD
+          maxLines = 1
+          ellipsize = android.text.TextUtils.TruncateAt.END
+          gravity = Gravity.CENTER_VERTICAL
+          minHeight = dp(40f)
+          setPadding(dp(14f), 0, dp(12f), 0)
+          elevation = 4f * d
+          visibility = View.GONE
+          contentDescription = "Phones in search circles"
+          setOnClickListener { showWatchMenu() }
+        }
+    binding.root.addView(
+        watchButton,
+        binding.root.indexOfChild(binding.more) + 1,
+        android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, dp(40f), Gravity.TOP or Gravity.CENTER_HORIZONTAL),
+    )
+    val sd = d * resources.configuration.fontScale
+    watchLogOverlay =
+        FolloWatchOverlay(FolloWatchOverlay.Kind.LOGS, d, sd).also {
+          // straight above the search grids, under the drawings
+          val g = map.overlays.indexOf(gridOverlay)
+          map.overlays.add(if (g >= 0) g + 1 else 0, it)
+        }
+    watchTopOverlay = FolloWatchOverlay(FolloWatchOverlay.Kind.TOP, d, sd).also { map.overlays.add(it) }
+    keepOwnOnTop()
+    folloWatchRepo.chosenArea?.let { watchChoice = FolloWatch.Choice.OnArea(it) }
+    watchStatusChanged()
+  }
+
+  /** The status element, the set-up or the power button changed: is this phone (still) one that may look? */
+  private fun watchStatusChanged() {
+    if (!::watchButton.isInitialized) return
+    val allowed =
+        (preferences.setupCompleted && viewModel.folloStatus.value?.message?.all == 1 || folloWatchRepo.demo) && !FolloPower.isOff
+    if (allowed == watchAllowed) return
+    watchAllowed = allowed
+    if (allowed) {
+      lifecycleScope.launch { if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) folloWatchRepo.fetch() }
+    } else {
+      clean = false
+      folloWatchRepo.clear()
+    }
+    watchChanged()
+  }
+
+  /** The phones in search circles that have not left (FP079): what is drawn, counted and listed. */
+  private fun watchPresent(snap: org.owntracks.android.data.repos.FolloWatchRepo.Snapshot = folloWatchRepo.snapshot.value): List<FolloWatch.Phone> =
+      if (BuildConfig.DEBUG && ghostDemoKeep) snap.phones
+      else FolloWatch.present(snap.phones, scopeAreas, System.currentTimeMillis() / 1000.0)
+
+  /** Debug builds only (`follo_ghost_demo` = "keep"): the made-up phones as 0.1.47 showed them, for a before / after. */
+  private var ghostDemoKeep = false
+
+  /** A new list (every 10 s while the app is in front): the dots, what the map is on, the lines, the drop-down. */
+  private fun watchChanged() {
+    if (!::watchButton.isInitialized || !::map.isInitialized) return
+    val on = watchAllowed && !FolloPower.isOff
+    // 19 Nov 2026: the drop-down shows only while the Searches button under "…" is on, then on every phone
+    val vis = if (searchPillShown()) View.VISIBLE else View.GONE
+    if (watchButton.visibility != vis) {
+      watchButton.visibility = vis
+      binding.root.post { placeOverlays() }
+    }
+    val snap = folloWatchRepo.snapshot.value
+    // "Volunteer view" (FP055 §7): the phone is like any volunteer's, so nothing of the other phones is on the map
+    val volunteer = folloScopeRepo.volunteerView
+    val phones = if (on && !volunteer) watchPresent(snap) else emptyList()
+    if (on && snap.fetchedAt != 0L) {
+      val settled = FolloWatch.settle(watchChoice, phones, snap.areas)
+      if (settled != watchChoice) {
+        if (watchChoice is FolloWatch.Choice.OnArea) folloWatchRepo.chosenArea = null // that search is gone
+        watchChoice = settled
+      }
+    }
+    val sharing = viewModel.folloStatus.value?.message?.state == "sharing"
+    val heldUser = (watchTarget as? FolloWatch.Target.OnPhone)?.user
+    // "Share everywhere I go": the map stays on this phone's own position, as with "My location"
+    val target = if (on && !volunteer && !FolloEverywhere.isOn) FolloWatch.target(watchChoice, heldUser, phones, sharing) else null
+    if (target != watchTarget) {
+      // something else to look at (or nothing any more): the map goes to it
+      watchTarget = target
+      watchFollowing = target != null
+      watchFramed = null
+      when (target) {
+        is FolloWatch.Target.OnPhone -> phones.firstOrNull { it.user == target.user }?.let { watchCentre(it.lat, it.lon, resetZoom = true) }
+        is FolloWatch.Target.OnArea -> watchFrameArea()
+        null -> {}
+      }
+    } else if (watchFollowing) {
+      when (target) {
+        is FolloWatch.Target.OnPhone -> phones.firstOrNull { it.user == target.user }?.let { watchCentre(it.lat, it.lon, resetZoom = false) }
+        is FolloWatch.Target.OnArea -> if (watchFramed != target.code) watchFrameArea() // its box had not come yet
+        null -> {}
+      }
+    }
+    drawWatch(phones, if (on && !volunteer) snap else org.owntracks.android.data.repos.FolloWatchRepo.Snapshot())
+    watchTitle()
+  }
+
+  private fun watchArea(code: String?): FolloWatch.Area? =
+      code?.let { c -> FolloWatch.counted(folloWatchRepo.snapshot.value.areas, watchPresent())?.firstOrNull { it.code == c } }
+
+  private fun watchTitle() {
+    if (!::watchButton.isInitialized) return
+    val present = watchPresent()
+    val t = watchTarget
+    val title =
+        (if (FolloEverywhere.isOn) getString(R.string.follo_everywhere_pill) // "Share everywhere I go": said on every phone
+        else if (!watchAllowed) viewArea() ?: getString(R.string.follo_search_pill_none) // an ordinary phone: the search in view
+        else if (folloScopeRepo.volunteerView) VOLUNTEER_VIEW
+        else
+            FolloWatch.title(
+                (t as? FolloWatch.Target.OnPhone)?.let { p -> present.firstOrNull { it.user == p.user } },
+                watchArea((t as? FolloWatch.Target.OnArea)?.code),
+                present.size,
+                System.currentTimeMillis() / 1000.0,
+            )) + "  ▾"
+    if (watchButton.text.toString() != title) {
+      watchButton.text = title
+      watchButton.post { watchButton.requestLayout() }
+    }
+  }
+
+  /** placeOverlays: on the round buttons' row, centred on the screen (19 Nov 2026), clear of recentre and "…". */
+  private fun placeWatch(top: Int) {
+    if (!::watchButton.isInitialized) return
+    val w = binding.root.width
+    val leftEdge = recentreStart() + if (binding.recentre.visibility == View.VISIBLE) dp(40f + 8f) else 0
+    val rightEdge = w - moreEnd() - dp(40f + 8f)
+    val room = (2 * minOf(w / 2 - leftEdge, rightEdge - w / 2)).coerceAtLeast(dp(80f))
+    if (watchButton.maxWidth != room) watchButton.maxWidth = room
+    watchButton.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      if (topMargin != top || marginStart != 0 || gravity != (Gravity.TOP or Gravity.CENTER_HORIZONTAL)) {
+        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        topMargin = top
+        marginStart = 0
+      }
+    }
+  }
+
+  /** The drop-down: the searches, then the phones in circles, then "My location". */
+  private fun showWatchMenu() {
+    if (!watchAllowed) return showSearchMenu() // an ordinary phone: the searches it is linked to
+    folloWatchRepo.snapshot.value.let { snap ->
+      val now = System.currentTimeMillis() / 1000.0
+      val menu = android.widget.PopupMenu(this, watchButton)
+      val actions = mutableListOf<() -> Unit>()
+      fun item(text: String, on: Boolean, group: Int = 0, action: (() -> Unit)?) {
+        val mi = menu.menu.add(group, actions.size, actions.size, if (on) "✓  $text" else text)
+        if (action == null) mi.isEnabled = false
+        actions += action ?: {}
+      }
+      val t = watchTarget
+      val everywhere = FolloEverywhere.isOn
+      val present = watchPresent(snap) // those who have left are not listed or counted (FP079)
+      FolloWatch.counted(snap.areas, present)?.let { areas ->
+        item("Searches", false, action = null)
+        for (a in areas) item(FolloWatch.areaLine(a), !everywhere && t is FolloWatch.Target.OnArea && t.code == a.code) {
+          watchChoose(FolloWatch.Choice.OnArea(a.code))
+        }
+      }
+      item(if (present.isEmpty()) "No phones in search circles" else "Phones in search circles", false, action = null)
+      for (p in present) item(FolloWatch.line(p, now), !everywhere && t is FolloWatch.Target.OnPhone && t.user == p.user) {
+        watchChoose(FolloWatch.Choice.OnPhone(p.user))
+      }
+      val volunteer = folloScopeRepo.volunteerView
+      item("My location", t == null && !volunteer && !everywhere) { watchChoose(FolloWatch.Choice.Me) }
+      // FP055 §7: this phone as any volunteer's phone shows it (search areas only); any other row switches it off
+      item(VOLUNTEER_VIEW, volunteer && !everywhere) {
+        everywhereLeave()
+        setVolunteerView(!volunteer)
+      }
+      // "Share everywhere I go" (Alex 22 Nov 2026): the last row, under a divider, while the server offers it
+      if (everywhereOffered()) {
+        androidx.core.view.MenuCompat.setGroupDividerEnabled(menu.menu, true)
+        item(getString(R.string.follo_everywhere_row), everywhere, group = 1) { everywhereTapped() }
+      }
+      menu.setOnMenuItemClickListener {
+        actions.getOrNull(it.itemId)?.invoke()
+        true
+      }
+      menu.show()
+    }
+    lifecycleScope.launch { folloWatchRepo.fetch() } // and ask now, as iOS does when the list is opened
+  }
+
+  /** A line of the drop-down was tapped. */
+  private fun watchChoose(choice: FolloWatch.Choice) {
+    everywhereLeave() // any other row = back to a normal search
+    if (folloScopeRepo.volunteerView) {
+      folloScopeRepo.volunteerView = false
+      scopeUpdate() // the mask and the limits go before the map moves to what was chosen
+    }
+    watchChoice = choice
+    folloWatchRepo.chosenArea = (choice as? FolloWatch.Choice.OnArea)?.code
+    watchTarget = null // taken as new by watchChanged: the map goes there
+    watchFollowing = false
+    if (choice == FolloWatch.Choice.Me) {
+      drawWatch(watchPresent(), folloWatchRepo.snapshot.value)
+      watchTitle()
+      recentre()
+      return
+    }
+    watchChanged()
+  }
+
+  /** recentre(): with the map on another phone or a search, the recentre button goes back to THAT. */
+  private fun watchRecentre(): Boolean {
+    when (val t = watchTarget) {
+      is FolloWatch.Target.OnPhone -> {
+        val p = watchPresent().firstOrNull { it.user == t.user } ?: return false
+        watchFollowing = true
+        watchCentre(p.lat, p.lon, resetZoom = true)
+        return true
+      }
+      is FolloWatch.Target.OnArea -> {
+        watchFollowing = true
+        watchFramed = null
+        watchFrameArea()
+        return true
+      }
+      null -> return false
+    }
+  }
+
+  /** The map on a phone that is not this one: north up, walking scale (or as it is), the phone in the visible middle. */
+  private fun watchCentre(lat: Double, lon: Double, resetZoom: Boolean) {
+    val zoom = if (resetZoom) START_ZOOM else map.zoomLevelDouble
+    watchPlace(lat, lon, zoom, animate = !resetZoom)
+  }
+
+  /** The chosen search: north up, its circles' box filling most of the visible map. Once its box is known. */
+  private fun watchFrameArea() {
+    val code = (watchTarget as? FolloWatch.Target.OnArea)?.code ?: return
+    val a = watchArea(code) ?: return
+    if (map.width == 0 || map.height == 0) {
+      map.post { if (watchFramed == null) watchFrameArea() }
+      return
+    }
+    val p = map.projection
+    val w = abs(p.getLongPixelXFromLongitude(a.east) - p.getLongPixelXFromLongitude(a.west)).toDouble()
+    val h = abs(p.getLongPixelYFromLatitude(a.south) - p.getLongPixelYFromLatitude(a.north)).toDouble()
+    val v = visible()
+    val zoom = FolloWatch.fitZoom(map.zoomLevelDouble, w, h, v.width().toDouble(), v.height().toDouble(), 0.85, map.minZoomLevel, START_ZOOM)
+    watchFramed = code
+    watchPlace((a.south + a.north) / 2, (a.west + a.east) / 2, zoom, animate = false)
+  }
+
+  /** North up at [zoom] with (lat, lon) in the middle of the visible map. The map counts as held (recentre shows). */
+  private fun watchPlace(lat: Double, lon: Double, zoom: Double, animate: Boolean, hold: Boolean = true) {
+    if (map.width == 0 || map.height == 0) {
+      map.post { watchPlace(lat, lon, zoom, animate, hold) }
+      return
+    }
+    overviewUntilFix = false
+    followPaused = hold // FP055's framed view of a search area is its home view: not held, so no recentre button
+    map.mapOrientation = 0f
+    val z0 = map.zoomLevelDouble
+    val lat0 = map.mapCenter.latitude
+    val pxPerM =
+        map.projection.metersToPixels(1f) * Math.pow(2.0, zoom - z0) * cos(Math.toRadians(lat0)) / cos(Math.toRadians(lat)).coerceAtLeast(0.01)
+    val v = visible()
+    val ox = v.centerX() - map.width / 2f // the point right of the view's centre by ox
+    val oy = v.centerY() - map.height / 2f // and below it by oy
+    var c = GeoPoint(lat, lon)
+    if (pxPerM > 0 && pxPerM.isFinite()) c = c.destinationPoint(oy / pxPerM, 0.0).destinationPoint(ox / pxPerM, -90.0)
+    if (zoom != z0) map.controller.setZoom(zoom)
+    // a short step glides (the phone walking); anything further is a jump
+    val step = map.mapCenter.let { FolloWatch.metres(it.latitude, it.longitude, c.latitude, c.longitude) }
+    if (animate && zoom == z0 && step < 300) map.controller.animateTo(c, null, PAN_MS) else map.controller.setCenter(c)
+    if (camera == Camera.NAV) requestNavFrame() // this phone's own arrow turns to suit the north-up map
+    map.invalidate()
+  }
+
+  /**
+   * Every phone's line of the last day: the one the map is on lime up to its dot, every other one a magenta tracklog;
+   * the chosen search's outline; a dot per phone in a circle. Only the lines that changed are worked out again.
+   */
+  private fun drawWatch(phones: List<FolloWatch.Phone>, snap: org.owntracks.android.data.repos.FolloWatchRepo.Snapshot) {
+    val logOverlay = watchLogOverlay ?: return
+    val top = watchTopOverlay ?: return
+    val liveUser = (watchTarget as? FolloWatch.Target.OnPhone)?.user
+    val logs = mutableListOf<DoubleArray>()
+    var live: List<DoubleArray> = emptyList()
+    watchPieces.keys.retainAll(snap.logs.keys)
+    val now = System.currentTimeMillis() / 1000.0
+    for ((user, points) in snap.logs) {
+      val isLive = user == liveUser
+      val dot = if (isLive) phones.firstOrNull { it.user == user } else null
+      // FP079 (22 Nov 2026): walking only, as the live map draws it (FolloWalk); worked out again only when the line
+      // changed, or when its newest piece has just gone quiet for a minute (a short one then comes off)
+      val quiet = points.lastOrNull()?.let { now - it.t > FolloWalk.TAIL } ?: true
+      val key = "${if (isLive) "live" else "log"}:${snap.logVersion[user] ?: 0}:${dot?.at ?: 0}:$quiet"
+      val pieces =
+          watchPieces[user]?.takeIf { it.first == key }?.second
+              ?: FolloWalk.lines(points.map { FolloWalk.Fix(it.t, it.lat, it.lon) }, now, dot?.let { it.lat to it.lon }, FolloWatch.CUT_M)
+                  .also { watchPieces[user] = key to it }
+      if (isLive) live = pieces else logs += pieces
+    }
+    logOverlay.logs = logs
+    logOverlay.isEnabled = true // other phones' tracklogs stay in the clean view (Alex 18 Nov 2026: "just not mine")
+    top.live = live
+    // FP078: the same dot as a team-mate's, the fill and the vest as the server sends them
+    watchDots = phones.map { FolloDots.Dot(it.lat, it.lon, it.tid, FolloRules.dotColour(it.tc), it.vest) }
+    watchUsers = phones.map { it.user }.toSet()
+    pushDots()
+    val area = (watchTarget as? FolloWatch.Target.OnArea)?.code?.let { c -> snap.areas?.firstOrNull { it.code == c } }
+    top.outline = area?.let { a -> snap.outlines[a.code]?.takeIf { it.size >= 6 } }
+    top.outlineColor = area?.color ?: Color.WHITE
+    map.invalidate()
+  }
+
+  // ── The simple screen (Alex, 19 Nov 2026; FOLLO_tracks/docs/SIMPLE_MODE_SPEC_20261119.md) ─────────────────────────
+  // The card is gone. One "…" button at the top right shows or hides a column: the layer buttons that exist for the
+  // search area in view (Tracklogs, Grids, Labels, Hillshade, Slope, Contours, POI), a half-button gap, then Rotate,
+  // Power, Compass and Searches. What each is set to is remembered on the phone and keeps showing while "…" is closed.
+  // The rules are FolloMenu (pure, unit-tested); the layer files come from FolloLayRepo, whole and in advance.
+
+  private val menuPrefs by lazy { getSharedPreferences("follo_menu", Context.MODE_PRIVATE) }
+
+  /** The column under "…" is showing (remembered; a new install starts closed). */
+  private var menuOpen: Boolean
+    get() = menuPrefs.getBoolean("more", false)
+    set(value) = menuPrefs.edit().putBoolean("more", value).apply()
+
+  /** The Compass button: the heading pill at the bottom left. Off until switched on. */
+  private var compassOn: Boolean
+    get() = menuPrefs.getBoolean("compass", false)
+    set(value) = menuPrefs.edit().putBoolean("compass", value).apply()
+
+  /** The Searches button: the drop-down at the top. Off until switched on. */
+  private var searchesOn: Boolean
+    get() = menuPrefs.getBoolean("searches", false)
+    set(value) = menuPrefs.edit().putBoolean("searches", value).apply()
+
+  private fun layerOn(l: FolloMenu.Layer): Boolean = menuPrefs.getBoolean("layer_" + l.key, l.defaultOn)
+
+  private val layerButtons = java.util.EnumMap<FolloMenu.Layer, FolloMenuButton>(FolloMenu.Layer::class.java)
+  private val functionButtons = java.util.EnumMap<FolloMenu.Function, View>(FolloMenu.Function::class.java)
+  private lateinit var powerButton: FolloPowerButton
+  /** The column as it shows now, top to bottom, and how many of them are layer buttons */
+  private var menuShown: List<View> = emptyList()
+  private var menuLayerCount = 0
+  /** Off: the power button stands alone where "…" is */
+  private var menuPowerAlone = false
+  private var menuKey = "-"
+  /** The search area the layer buttons and the layers were last worked out for */
+  private var menuArea: String? = null
+  private var hsOverlay: FolloPackOverlay? = null
+  private var slOverlay: FolloPackOverlay? = null
+  private var ctOverlay: FolloLayOverlay? = null
+  private var tlOverlay: FolloLayOverlay? = null
+  private var poiOverlay: FolloLayOverlay? = null
+  /** What each layer on the map was last loaded from (its file's path; null = nothing) */
+  private val layerShown = java.util.EnumMap<FolloMenu.Layer, String>(FolloMenu.Layer::class.java)
+  /** A search chosen in an ordinary phone's drop-down (spec §7): its LAST view, until a fix inside a held area. */
+  private var scopeChosen: String? = null
+
+  /** onCreate, after the map: the buttons of the column and the layers' overlays (under the grids, under the mask). */
+  private fun buildMenu() {
+    val d = resources.displayMetrics.density
+    val sd = d * resources.configuration.fontScale
+    // the layers, bottom to top: hillshade (a base) → slope → contours → tracklogs → [grids, labels] → POI
+    val redraw: () -> Unit = { map.postInvalidate() }
+    hsOverlay = FolloPackOverlay(opaque = true, redraw).also { map.overlays.add(0, it) }
+    slOverlay = FolloPackOverlay(opaque = false, redraw).also { map.overlays.add(1, it) }
+    ctOverlay = FolloLayOverlay(FolloLayOverlay.Kind.CONTOURS, d, sd).also { map.overlays.add(2, it) }
+    tlOverlay = FolloLayOverlay(FolloLayOverlay.Kind.TRACKLOGS, d, sd).also { map.overlays.add(3, it) }
+    poiOverlay = FolloLayOverlay(FolloLayOverlay.Kind.POI, d, sd).also { map.overlays.add(map.overlays.indexOf(gridOverlay) + 1, it) }
+
+    binding.more.shapes = FolloMenuButton.dots()
+    binding.more.setOnClickListener {
+      menuOpen = !menuOpen
+      renderMenu()
+    }
+    val at = binding.root.indexOfChild(binding.more) + 1
+    fun add(v: View, cd: String) {
+      v.visibility = View.GONE
+      v.contentDescription = cd
+      binding.root.addView(v, at, android.widget.FrameLayout.LayoutParams(dp(40f), dp(40f), Gravity.TOP or Gravity.END))
+    }
+    fun photo(id: Int) = android.graphics.BitmapFactory.decodeResource(resources, id)
+    for (l in FolloMenu.Layer.entries) {
+      val b = FolloMenuButton(this)
+      b.look = FolloMenuButton.Look.LAYER
+      when (l) {
+        FolloMenu.Layer.TRACKLOGS -> b.shapes = FolloMenuButton.tracklogs()
+        FolloMenu.Layer.GRIDS -> b.shapes = FolloMenuButton.grids()
+        FolloMenu.Layer.LABELS -> b.tag = "A1"
+        FolloMenu.Layer.HILLSHADE -> b.photo = photo(R.drawable.follo_layer_hill)
+        FolloMenu.Layer.SLOPE -> b.photo = photo(R.drawable.follo_layer_slope)
+        FolloMenu.Layer.CONTOURS -> b.photo = photo(R.drawable.follo_layer_contours)
+        FolloMenu.Layer.POI -> b.shapes = FolloMenuButton.poi()
+      }
+      b.setOnClickListener { onLayerTapped(l) }
+      layerButtons[l] = b
+      add(b, layerName(l))
+    }
+    val rotate = FolloMenuButton(this)
+    rotate.symbol = ResourcesCompat.getDrawable(resources, R.drawable.ic_follo_rotate, null)?.mutate()
+    rotate.setOnClickListener { screenTurner.turn() }
+    functionButtons[FolloMenu.Function.ROTATE] = rotate
+    add(rotate, getString(R.string.follo_rotate))
+    // Power button (13 Nov 2026): hold 2 s = Off, one tap = on again. Under "…" since 19 Nov 2026; Off, it stands alone
+    // where "…" is, so the phone can always be turned back on.
+    powerButton = FolloPowerButton(this)
+    powerButton.elevation = 4f * d
+    powerButton.outlineProvider =
+        object : android.view.ViewOutlineProvider() {
+          override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
+        }
+    powerButton.onTurnOff = { setPower(off = true) }
+    powerButton.onTurnOn = { setPower(off = false) }
+    powerButton.onHint = { Toast.makeText(this, R.string.follo_power_hold_hint, Toast.LENGTH_SHORT).show() }
+    functionButtons[FolloMenu.Function.POWER] = powerButton
+    add(powerButton, getString(R.string.follo_power_cd_on))
+    val compassButton = FolloMenuButton(this)
+    compassButton.shapes = FolloMenuButton.compass()
+    compassButton.setOnClickListener {
+      compassOn = !compassOn
+      renderMenu()
+    }
+    functionButtons[FolloMenu.Function.COMPASS] = compassButton
+    add(compassButton, getString(R.string.follo_fn_compass))
+    val searchesButton = FolloMenuButton(this)
+    searchesButton.shapes = FolloMenuButton.australia()
+    searchesButton.pictureScale = 27f / 24f
+    searchesButton.setOnClickListener {
+      searchesOn = !searchesOn
+      renderMenu()
+      watchChanged()
+    }
+    functionButtons[FolloMenu.Function.SEARCHES] = searchesButton
+    add(searchesButton, getString(R.string.follo_fn_searches))
+  }
+
+  private fun layerName(l: FolloMenu.Layer): String =
+      getString(
+          when (l) {
+            FolloMenu.Layer.TRACKLOGS -> R.string.follo_layer_tl
+            FolloMenu.Layer.GRIDS -> R.string.follo_layer_grids
+            FolloMenu.Layer.LABELS -> R.string.follo_layer_labels
+            FolloMenu.Layer.HILLSHADE -> R.string.follo_layer_hs
+            FolloMenu.Layer.SLOPE -> R.string.follo_layer_sl
+            FolloMenu.Layer.CONTOURS -> R.string.follo_layer_ct
+            FolloMenu.Layer.POI -> R.string.follo_layer_poi
+          })
+
+  /**
+   * The search area "in view": where FP055 applies, the area the screen is on (V); on an exempt phone, the search
+   * chosen in the drop-down, else the held area under the middle of the map, else the one the phone is in.
+   */
+  private fun viewArea(): String? {
+    if (!::map.isInitialized) return null
+    if (scopeActive) return scopeState?.view?.area
+    (watchTarget as? FolloWatch.Target.OnArea)?.code?.let { if (it in scopeAreas) return it }
+    val c = map.mapCenter
+    FolloScope.areasAt(c.latitude, c.longitude, scopeAreas).firstOrNull()?.let { return it }
+    return viewModel.currentLocation.value?.let { FolloScope.areasAt(it.latitude, it.longitude, scopeAreas).firstOrNull() }
+  }
+
+  /** The hillshade is the base map right now (its pack is on the phone and drawn in place of the imagery). */
+  private fun hillshadeShown(): Boolean = hsOverlay?.pack != null
+
+  /**
+   * Which buttons show and what they say (spec §2): on every render, and when the view, the grids, the layer list or
+   * the layer files change. Views are touched only when something changes.
+   */
+  private fun renderMenu() {
+    if (!::binding.isInitialized || !::powerButton.isInitialized) return
+    val kind = state?.kind
+    val off = FolloPower.isOff
+    val has = kind != null && kind !in NO_MENU_KINDS && !clean
+    val showMore = has && !off
+    val open = showMore && menuOpen
+    val area = viewArea()
+    menuArea = area
+    val gridArea = area?.let { a -> folloGridRepo.grid.value?.areas?.firstOrNull { it.code == a } }
+    val layers =
+        if (open && !scopeCovered)
+            FolloMenu.layerButtons(
+                folloLayRepo.list.value?.listed.orEmpty(),
+                gridArea?.teams?.any { it.lines.isNotEmpty() } == true,
+                gridArea?.names?.isNotEmpty() == true,
+                area,
+            )
+        else emptyList()
+    val functions =
+        when {
+          off && kind == Kind.OFF && !clean -> listOf(FolloMenu.Function.POWER)
+          !open -> emptyList()
+          scopeCovered -> listOf(FolloMenu.Function.POWER, FolloMenu.Function.SEARCHES) // WAITING: no map
+          else -> FolloMenu.Function.entries
+        }
+    fun vis(v: View, show: Boolean) {
+      val want = if (show) View.VISIBLE else View.GONE
+      if (v.visibility != want) v.visibility = want
+    }
+    vis(binding.more, showMore)
+    binding.more.on = open
+    binding.more.contentDescription = getString(if (open) R.string.follo_more_open else R.string.follo_more)
+    for ((l, b) in layerButtons) {
+      vis(b, l in layers)
+      val on = layerOn(l)
+      b.on = on
+      b.contentDescription = getString(if (on) R.string.follo_layer_on else R.string.follo_layer_off, layerName(l))
+    }
+    for ((f, v) in functionButtons) vis(v, f in functions)
+    (functionButtons[FolloMenu.Function.COMPASS] as? FolloMenuButton)?.on = compassOn
+    (functionButtons[FolloMenu.Function.SEARCHES] as? FolloMenuButton)?.on = searchesOn
+    powerButton.off = off
+    menuShown = layers.mapNotNull { layerButtons[it] } + functions.mapNotNull { functionButtons[it] }
+    menuLayerCount = layers.size
+    menuPowerAlone = off && functions.size == 1
+    val key = "$showMore|$open|$layers|$functions|$menuPowerAlone"
+    if (key != menuKey) {
+      menuKey = key
+      binding.root.post { placeOverlays() }
+    }
+    applyLayers()
+    renderHeading()
+    if (::watchButton.isInitialized) {
+      val pill = if (searchPillShown()) View.VISIBLE else View.GONE
+      if (watchButton.visibility != pill) {
+        watchButton.visibility = pill
+        binding.root.post { placeOverlays() }
+      }
+      watchTitle()
+    }
+  }
+
+  /** placeOverlays: the column under "…" (spec §2), further columns to the left when it does not fit. */
+  private fun placeMenu(top: Int, end: Int, pillAbove: Int) {
+    if (!::powerButton.isInitialized || menuShown.isEmpty()) return
+    val d = resources.displayMetrics.density
+    if (menuPowerAlone) {
+      powerButton.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+        if (topMargin != top || marginEnd != end) {
+          topMargin = top
+          marginEnd = end
+        }
+      }
+      return
+    }
+    val first = top + dp(40f + 10f)
+    val pillH = binding.coords.height.takeIf { it > 0 } ?: dp(29f)
+    val avail = (binding.root.height - pillAbove - pillH - dp(8f) - first) / d
+    val slots = FolloMenu.layout(menuLayerCount, menuShown.size - menuLayerCount, avail)
+    for ((i, v) in menuShown.withIndex()) {
+      val s = slots.getOrNull(i) ?: continue
+      val t = first + (s.y * d).roundToInt()
+      val e = end + s.column * dp(40f + 10f)
+      v.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+        if (topMargin != t || marginEnd != e) {
+          topMargin = t
+          marginEnd = e
+        }
+      }
+    }
+  }
+
+  /** A layer button was tapped: on / off, remembered. A hillshade or slope that still waits for Wi-Fi asks first. */
+  private fun onLayerTapped(l: FolloMenu.Layer) {
+    val on = !layerOn(l)
+    menuPrefs.edit().putBoolean("layer_" + l.key, on).apply()
+    val area = viewArea()
+    if (on && area != null && folloLayRepo.needsAsking(area, l)) {
+      MaterialAlertDialogBuilder(this)
+          .setTitle(if (l == FolloMenu.Layer.HILLSHADE) R.string.follo_lay_ask_hs else R.string.follo_lay_ask_sl)
+          .setMessage(getString(R.string.follo_offline_ask_msg, FolloMenu.megabytes(folloLayRepo.kb(area, l.key))))
+          .setPositiveButton(R.string.follo_offline_ask_yes) { _, _ -> folloLayRepo.allowMetered(area, l.key) }
+          .setNegativeButton(R.string.follo_offline_ask_no, null)
+          .show()
+    }
+    renderMenu()
+  }
+
+  /**
+   * What the map draws of the layers (spec §6): each one that is switched on and on the phone for the area in view.
+   * Files are opened and read off the main thread; a layer that is on but not on the phone yet appears when it lands.
+   */
+  private fun applyLayers() {
+    if (!::map.isInitialized || hsOverlay == null) return
+    gridOverlay?.let {
+      val lines = layerOn(FolloMenu.Layer.GRIDS)
+      val names = layerOn(FolloMenu.Layer.LABELS)
+      if (it.showLines != lines || it.showNames != names) {
+        it.showLines = lines
+        it.showNames = names
+        map.invalidate()
+      }
+    }
+    val area = menuArea
+    val none = scopeCovered || FolloPower.isOff
+    // The layers switched on for the area in view are fetched now if they are not on the phone, however far away the
+    // search is (spec §5, added 19 Nov 2026: FOLLO-L in Queensland looking at FG drew nothing)
+    folloLayRepo.want(
+        if (none || area == null) emptySet()
+        else FolloMenu.Layer.entries.filter { it != FolloMenu.Layer.GRIDS && it != FolloMenu.Layer.LABELS && layerOn(it) }.map { "$area/${it.key}" }.toSet()
+    )
+    for (l in FolloMenu.Layer.entries) {
+      if (l == FolloMenu.Layer.GRIDS || l == FolloMenu.Layer.LABELS) continue
+      val file = if (!none && area != null && layerOn(l)) folloLayRepo.file(area, l.key) else null
+      val path = file?.path
+      if (layerShown[l] == path) continue
+      if (path == null) layerShown.remove(l) else layerShown[l] = path
+      if (file == null) {
+        setLayer(l, null, null, null, null)
+        continue
+      }
+      lifecycleScope.launch {
+        var pack: FolloPack? = null
+        var contours: List<FolloLay.Contour>? = null
+        var lines: List<DoubleArray>? = null
+        var pois: List<FolloLay.Poi>? = null
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+          try {
+            when (l) {
+              FolloMenu.Layer.HILLSHADE, FolloMenu.Layer.SLOPE -> pack = FolloPack.open(file)
+              FolloMenu.Layer.CONTOURS -> contours = FolloLay.parseContours(file.readText())
+              FolloMenu.Layer.TRACKLOGS -> lines = FolloLay.parseLines(file.readText())
+              FolloMenu.Layer.POI -> pois = FolloLay.parsePois(file.readText())
+              else -> {}
+            }
+          } catch (e: Exception) {
+            Timber.w(e, "Could not read layer ${l.key}")
+          }
+        }
+        if (layerShown[l] == path) setLayer(l, pack, contours, lines, pois) else pack?.close()
+      }
+    }
+  }
+
+  private fun setLayer(l: FolloMenu.Layer, pack: FolloPack?, contours: List<FolloLay.Contour>?, lines: List<DoubleArray>?, pois: List<FolloLay.Poi>?) {
+    when (l) {
+      FolloMenu.Layer.HILLSHADE -> {
+        hsOverlay?.let { o ->
+          val old = o.pack
+          o.pack = pack
+          old?.close()
+        }
+        // a base map: the hillshade in place of the imagery (no imagery tile is drawn or asked for meanwhile)
+        map.overlayManager.tilesOverlay.isEnabled = pack == null
+        showCredit()
+      }
+      FolloMenu.Layer.SLOPE ->
+          slOverlay?.let { o ->
+            val old = o.pack
+            o.pack = pack
+            old?.close()
+          }
+      FolloMenu.Layer.CONTOURS -> ctOverlay?.contours = contours.orEmpty()
+      FolloMenu.Layer.TRACKLOGS -> tlOverlay?.lines = lines.orEmpty()
+      FolloMenu.Layer.POI -> poiOverlay?.pois = pois.orEmpty()
+      else -> {}
+    }
+    map.invalidate()
+  }
+
+  // ── The two-way symbol (spec §3) ────────────────────────────────────────────────────────
+
+  private var linkCap = 0f
+  private val hideLinkBubble = Runnable { if (::binding.isInitialized) binding.linkBubble.visibility = View.GONE }
+
+  /** Green / orange / red with a slash; hidden before set up, on the permission screens and while Off. */
+  private fun renderLink() {
+    if (!::binding.isInitialized) return
+    val kind = state?.kind
+    val show = kind != null && kind !in NO_MENU_KINDS && kind != Kind.OFF
+    val visibility = if (show) View.VISIBLE else View.GONE
+    if (binding.link.visibility != visibility) {
+      binding.link.visibility = visibility
+      if (!show) binding.linkBubble.visibility = View.GONE
+      binding.root.post { placeOverlays() }
+    }
+    if (!show) return
+    if (linkCap == 0f) {
+      val r = android.graphics.Rect()
+      binding.title.paint.getTextBounds("H", 0, 1, r)
+      linkCap = r.height().toFloat()
+      binding.link.capHeight = linkCap
+    }
+    val link = folloLinkRepo.link()
+    binding.link.state = link
+    val cd =
+        getString(
+            when (link) {
+              FolloMenu.Link.GREEN -> R.string.follo_link_green
+              FolloMenu.Link.ORANGE -> R.string.follo_link_orange
+              FolloMenu.Link.RED -> R.string.follo_link_red
+            })
+    if (binding.link.contentDescription != cd) binding.link.contentDescription = cd
+  }
+
+  /** placeOverlays: the chip's middle on the middle of the title's first line of capitals; the bubble under it. */
+  private fun placeLink() {
+    val chip = binding.link
+    if (chip.visibility != View.VISIBLE || chip.height == 0) return
+    val layout = binding.title.layout ?: return
+    val middle = binding.title.top + binding.title.paddingTop + layout.getLineBaseline(0) - linkCap / 2f
+    val ty = middle - (chip.top + chip.height / 2f)
+    if (kotlin.math.abs(chip.translationY - ty) > 0.5f) chip.translationY = ty
+    val chipBottom = binding.banner.top + binding.titleRow.top + chip.top + chip.translationY + chip.height - chip.touchPx
+    val chipRight = binding.banner.left + binding.titleRow.left + chip.right - chip.touchPx
+    val top = chipBottom.roundToInt() + dp(4f)
+    val end = (binding.root.width - chipRight).coerceAtLeast(dp(8f))
+    binding.linkBubble.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+      if (topMargin != top || marginEnd != end) {
+        topMargin = top
+        marginEnd = end
+      }
+    }
+  }
+
+  /** A tap on the two-way symbol: the tracker's name and when it last sent, as the card said them, for 4 seconds. */
+  private fun showLinkBubble() {
+    binding.linkBubble.text = whoText() + "\n" + lastText()
+    binding.linkBubble.visibility = View.VISIBLE
+    binding.linkBubble.removeCallbacks(hideLinkBubble)
+    binding.linkBubble.postDelayed(hideLinkBubble, LINK_BUBBLE_MS)
+    binding.root.post { placeOverlays() }
+  }
+
+  // ── The Searches button's drop-down on an ordinary phone (spec §7) ──────────────────────
+
+  /** The drop-down shows while the Searches button is on (every phone), not before set up, on a permission screen or Off. */
+  private fun searchPillShown(): Boolean {
+    val kind = state?.kind
+    // "Share everywhere I go": the pill shows for as long as the mode is on, whatever the Searches button is set to
+    return (searchesOn || FolloEverywhere.isOn) && preferences.setupCompleted && !FolloPower.isOff && kind != null && kind !in NO_MENU_KINDS
+  }
+
+  /** The searches this phone holds circles for, then "Automatic". Nothing about the choice is sent anywhere. */
+  private fun showSearchMenu() {
+    val menu = android.widget.PopupMenu(this, watchButton)
+    val names = folloLayRepo.list.value?.names.orEmpty()
+    val areas = scopeAreas.keys.sorted()
+    val shown = scopeState?.view?.area
+    val everywhere = FolloEverywhere.isOn
+    areas.forEachIndexed { i, code ->
+      val line = names[code]?.let { "$code  $it" } ?: code
+      menu.menu.add(0, i, i, if (!everywhere && code == (scopeChosen ?: shown)) "✓  $line" else line)
+    }
+    menu.menu.add(0, areas.size, areas.size, getString(R.string.follo_search_auto))
+    // "Share everywhere I go" (Alex 22 Nov 2026): the last row, under a divider, while the server offers it
+    val everywhereId = areas.size + 1
+    if (everywhereOffered()) {
+      androidx.core.view.MenuCompat.setGroupDividerEnabled(menu.menu, true)
+      val row = getString(R.string.follo_everywhere_row)
+      menu.menu.add(1, everywhereId, everywhereId, if (everywhere) "✓  $row" else row)
+    }
+    menu.setOnMenuItemClickListener { item ->
+      if (item.itemId == everywhereId) {
+        everywhereTapped()
+        return@setOnMenuItemClickListener true
+      }
+      everywhereLeave() // any other row = back to a normal search
+      val code = areas.getOrNull(item.itemId)
+      scopeChosen = code
+      scopeUpdate()
+      // already on that area's framed view (or back to automatic on the same one): frame it afresh
+      if (scopeActive && scopeState?.view?.mode == FolloScope.Mode.LAST) {
+        followPaused = false
+        showRecentre()
+        scopeHome()
+      }
+      renderMenu()
+      true
+    }
+    menu.show()
+  }
+
+  // ── "⚠ Share everywhere I go ⚠" (Alex, 22 Nov 2026; FOLLO_tracks/docs/NEXT_BUILD_SPEC_20261122.md §D) ─────────────────
+  // "in the menu of searches on the app (when they've tapped the Australia map), have a special 'search' … which ignores
+  // all the rules about tracking (e.g. geofencing circles) and allows someone who is really keen to record something in a
+  // random place to record it … I want them to have it but with plenty of warning. This turns off the greying out. It
+  // doesn't try to download map as there's no defined area. There's no time restrictions on this mode either."
+  // The flag is support/FolloEverywhere; what leaves the phone is decided in LocationProcessor, never here.
+
+  private var everywhereDialog: androidx.appcompat.app.AlertDialog? = null
+  /** Debug builds only (`follo_ev_demo`): the row is offered with no server saying so, for screenshots (offline). */
+  private var everywhereDemo = false
+  /** The note above the bottom band is the "turned off by FOLLO" one right now (a tap dismisses it). */
+  private var everywhereNote = false
+  private var everywhereNoteTimer = false
+
+  /** The row exists only while the last status element says this server takes such posts. */
+  private fun everywhereOffered(): Boolean =
+      FolloRules.everywhereOffered(viewModel.folloStatus.value?.message?.ev) || (BuildConfig.DEBUG && everywhereDemo)
+
+  /** The row was tapped: on = back to a normal search ("Automatic"); off = the pop-up, and the mode only on OK. */
+  private fun everywhereTapped() {
+    if (FolloEverywhere.isOn) {
+      everywhereLeave()
+      return
+    }
+    everywhereDialog?.dismiss()
+    everywhereDialog =
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.follo_everywhere_row)
+            .setMessage(R.string.follo_everywhere_msg)
+            .setPositiveButton(R.string.follo_everywhere_ok) { _, _ -> everywhereStart() }
+            .setNegativeButton(R.string.follo_everywhere_cancel, null)
+            .show()
+  }
+
+  /** OK on the pop-up: the mode is on from now. */
+  private fun everywhereStart() {
+    if (FolloPower.isOff || !preferences.setupCompleted) return
+    FolloEverywhere.shownAt = System.currentTimeMillis()
+    locationProcessor.onEverywhereOn() // the flag, Move; the screen follows the flag (everywhereChanged)
+    // and a position now, rather than at the next fix the tracking takes
+    lastOpenCheckInAt = -OPEN_CHECK_IN_DEDUPE_MS
+    openCheckIn()
+  }
+
+  /** Back to a normal search, if the mode is on (any other row of the drop-down, the ticked row, "Back to normal"). */
+  private fun everywhereLeave() {
+    if (!FolloEverywhere.isOn) return
+    // the flag is cleared before this returns (nothing in between can leave by the mode); the hello follows
+    lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { locationProcessor.onEverywhereOff() }
+  }
+
+  /** The switch was thrown (here or by the server): the mask, the limits, what the map is on, the pill, the banner. */
+  private fun everywhereChanged(on: Boolean) {
+    if (!::binding.isInitialized || !::map.isInitialized) return
+    if (on) {
+      // whatever search or phone was chosen before is let go: leaving the mode is "Automatic" (spec §D4)
+      scopeChosen = null
+      watchChoice = FolloWatch.Choice.Auto
+      if (folloWatchRepo.chosenArea != null) folloWatchRepo.chosenArea = null
+      clean = false
+      if (folloScopeRepo.volunteerView) folloScopeRepo.volunteerView = false
+    } else {
+      everywhereDialog?.dismiss()
+      everywhereDialog = null
+    }
+    scopeUpdate()
+    watchChanged()
+    render()
+    if (on && !FolloPower.isOff) {
+      // this phone's own position, anywhere: follow it as the app always has outside FP055
+      followPaused = false
+      showRecentre()
+      recentre()
+    }
+  }
+
+  /** Coming to the front with the mode on, 12 hours or more after the pop-up was last shown: the same words again. */
+  private fun everywhereRemind(force: Boolean = false) {
+    if (!FolloEverywhere.isOn || FolloPower.isOff) return
+    val now = System.currentTimeMillis()
+    if (!force && !FolloRules.reminderDue(FolloEverywhere.shownAt, now)) return
+    if (everywhereDialog?.isShowing == true) return
+    FolloEverywhere.shownAt = now
+    everywhereDialog =
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.follo_everywhere_row)
+            .setMessage(R.string.follo_everywhere_msg)
+            .setPositiveButton(R.string.follo_everywhere_keep, null)
+            .setNegativeButton(R.string.follo_everywhere_back) { _, _ -> everywhereLeave() }
+            .show()
+  }
+
+  /** The "turned off by FOLLO" notice is on the screen: it goes by itself after 30 s (or at a tap). */
+  private fun everywhereNoteShown() {
+    if (everywhereNoteTimer) return
+    everywhereNoteTimer = true
+    binding.note.postDelayed(
+        {
+          everywhereNoteTimer = false
+          FolloEverywhere.noticeDone()
+        },
+        EVERYWHERE_NOTE_MS,
+    )
+  }
+
+  /** Debug builds only (`follo_menu_set` = "more=1,hs=1,compass=0,…"): what the buttons are set to, for screenshots. */
+  private fun menuSet(text: String) {
+    val e = menuPrefs.edit()
+    for (pair in text.split(',')) {
+      val k = pair.substringBefore('=').trim()
+      val on = pair.substringAfter('=', "1").trim() == "1"
+      when (k) {
+        "more", "compass", "searches" -> e.putBoolean(k, on)
+        else -> FolloMenu.Layer.entries.firstOrNull { it.key == k }?.let { e.putBoolean("layer_" + it.key, on) }
+      }
+    }
+    e.apply()
+    renderMenu()
+    watchChanged()
+  }
+
 
   companion object {
     private const val REGION_PREFIX = "region-"
+    /** The drop-down's row and title while an exempt phone shows what a volunteer's does (FP055 §7) */
+    private const val VOLUNTEER_VIEW = "Volunteer view"
+    /** How far out the map zooms where FP055 sets no limit (as it always did) */
+    private const val SCOPE_FREE_MIN_ZOOM = 3.0
     private const val DRAW_PREFIX = "draw-" // pins among base camp's drawings (12 Nov 2026)
     private const val AREA_ID = "follo-area"
     private const val AREA_EDGE_ID = "follo-area-edge"
@@ -2562,16 +4099,28 @@ class MainActivity :
     private const val CALM_TURN_DEG = 30f
     /** Where the dot / arrow sits, as a fraction of the way down the visible map. */
     private const val HEADING_DOWN = 0.75f
-    private const val NAV_DOWN = 0.80f
-    /** Sideways (14 Nov 2026): the arrow in the middle of the open map, top to bottom. */
-    private const val LAND_DOWN = 0.5f
     /** Sideways (Alex 14 Nov 2026): the status panel and the card are this wide; the card is this tall at least. */
     private const val SIDE_PANEL_DP = 280f
-    private const val LAND_CARD_DP = 80f
     /** States in which the position pill is not shown: no position may be used or none is coming. */
     /** The Always step's column at most this wide (spec 15 Nov 2026). */
     private const val ALWAYS_MAX_DP = 420
     private val NO_POSITION_KINDS = setOf(Kind.NOT_SET_UP, Kind.SETTING_UP, Kind.NEED_LOCATION, Kind.LOCATION_OFF, Kind.NEED_PRECISE, Kind.OFF)
+    /** Not set up and the permission screens: no "…" button, no two-way symbol, no drop-down (19 Nov 2026). */
+    private val NO_MENU_KINDS =
+        setOf(
+            Kind.NOT_SET_UP,
+            Kind.SETTING_UP,
+            Kind.NEED_LOCATION,
+            Kind.LOCATION_OFF,
+            Kind.NEED_PRECISE,
+            Kind.NEED_BACKGROUND,
+            Kind.NEED_NOTIFICATIONS,
+            Kind.NEED_BATTERY,
+        )
+    /** The "Share everywhere has been turned off by FOLLO." notice stays this long unless tapped */
+    private const val EVERYWHERE_NOTE_MS = 30_000L
+    /** The bubble under the two-way symbol stays this long */
+    private const val LINK_BUBBLE_MS = 4_000L
     /** The map's turn eases toward the compass with this time constant (seconds). */
     private const val HEADING_TAU_S = 0.25f
     /** Closer than this to the compass = done turning (no more redraws). */
@@ -2583,6 +4132,10 @@ class MainActivity :
     private const val START_ZOOM = 18.5
     /** savedInstanceState key: how far the rotate button has turned the screen (0, 90, 180, 270) */
     private const val TURN_KEY = "follo_turn"
+    /** The heading pill is redrawn at most this often (~5 a second, spec §5). */
+    private const val PILL_MIN_MS = 200L
+    /** Pill text and dial at 55 % white while the compass needs calibrating (spec §5). */
+    private const val POOR_ALPHA = 140
     /** All of Australia, shown until the first fix when the phone has no position at all. */
     private const val OVERVIEW_ZOOM = 4.0
     private const val LABEL_SUFFIX = "-label"

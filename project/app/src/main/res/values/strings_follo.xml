@@ -44,6 +44,8 @@
     <!-- Power button (Alex, 13 Nov 2026): hold 2 s = Off (no location at all), one tap = on again; same words on iOS -->
     <string name="follo_off_title">Off</string>
     <string name="follo_off_sub">Not using GPS. FOLLO can still send you notifications</string>
+    <!-- FP055 (19 Nov 2026): a phone that has not been to any of its search areas shows no map, only this -->
+    <string name="follo_waiting_area">Waiting to arrive at your first search area</string>
     <string name="follo_off_map">Tap the power button to turn on GPS</string>
     <string name="follo_power_hold_hint">Hold for 2 seconds to turn off</string>
     <string name="follo_power_cd_on">Power. Hold for 2 seconds to turn FOLLO Tracks off</string>
@@ -92,6 +94,28 @@
     <string name="follo_notif_standby">FOLLO Tracks: standing by</string>
     <string name="follo_notif_trouble">Can\'t reach FOLLO right now; positions are saved and sent later</string>
     <string name="follo_area_label">Search area</string>
+    <!-- The simple screen (Alex 19 Nov 2026) -->
+    <string name="follo_more">More buttons</string>
+    <string name="follo_more_open">More buttons, showing</string>
+    <string name="follo_layer_tl">Tracklogs</string>
+    <string name="follo_layer_grids">Search grids</string>
+    <string name="follo_layer_labels">Grid labels</string>
+    <string name="follo_layer_hs">Hillshade</string>
+    <string name="follo_layer_sl">Slope</string>
+    <string name="follo_layer_ct">Contours</string>
+    <string name="follo_layer_poi">Points of interest</string>
+    <string name="follo_layer_on">%1$s, on</string>
+    <string name="follo_layer_off">%1$s, off</string>
+    <string name="follo_fn_compass">Compass heading</string>
+    <string name="follo_fn_searches">Searches</string>
+    <string name="follo_link_green">Connection to FOLLO: working</string>
+    <string name="follo_link_orange">Connection to FOLLO: waiting to send for over a minute</string>
+    <string name="follo_link_red">Connection to FOLLO: nothing sent for over five minutes</string>
+    <string name="follo_lay_ask_hs">Download hillshade now?</string>
+    <string name="follo_lay_ask_sl">Download slope now?</string>
+    <string name="follo_credit_hillshade">Hillshade: FOLLO from state LiDAR</string>
+    <string name="follo_search_auto">Automatic</string>
+    <string name="follo_search_pill_none">Searches</string>
     <string name="follo_rotate">Turn the screen a quarter turn</string>
     <string name="follo_location_howto">Permissions › Location › Allow all the time</string>
     <string name="follo_notif_off_note">Notifications are off — the app still works</string>
@@ -112,10 +136,31 @@
     <string name="follo_tick_map_bad">no offline map</string>
     <string name="follo_tick_app_ok">latest app</string>
     <string name="follo_tick_app_bad">app out of date</string>
+    <!-- FP083 (22 Nov 2026): the middle state of each tick, partial / in progress -->
+    <string name="follo_tick_circles_part">circles on this phone, not checked in today</string>
+    <string name="follo_tick_map_part">offline map saving</string>
+    <string name="follo_tick_app_part">a newer app has just come out</string>
+    <!-- "Share everywhere I go" (Alex, 22 Nov 2026; docs/NEXT_BUILD_SPEC_20261122.md §D). The row and the pop-up's
+         message are Alex's own words: do not reword them. U+26A0 U+FE0F = the yellow warning sign. -->
+    <string name="follo_everywhere_row">\u26A0\uFE0F Share everywhere I go \u26A0\uFE0F</string>
+    <string name="follo_everywhere_msg">While you are in this search mode, your location is shared with FOLLO every 5 seconds until you change back to a normal search.</string>
+    <string name="follo_everywhere_ok">OK</string>
+    <string name="follo_everywhere_cancel">Cancel</string>
+    <string name="follo_everywhere_keep">Keep sharing</string>
+    <string name="follo_everywhere_back">Back to normal</string>
+    <string name="follo_everywhere_pill">\u26A0\uFE0F Everywhere</string>
+    <!-- 22 Nov 2026 (0.1.49, Alex: "I agree with shorter wording"): was "…with FOLLO everywhere", two lines on a narrow phone -->
+    <string name="follo_everywhere_banner">\u26A0\uFE0F Sharing location everywhere</string>
+    <string name="follo_everywhere_notif">Sharing your location with FOLLO everywhere</string>
+    <string name="follo_everywhere_server_off">Share everywhere has been turned off by FOLLO.</string>
     <string name="follo_check_share">Share the phone check</string>
     <string name="follo_offline_ask_share">Share check</string>
     <string name="follo_coords_cd">Your position %1$s. Press and hold to share it</string>
     <string name="follo_coords_share">Share your position</string>
+    <!-- Compass heading pill (Cam Allport 15 Nov 2026, spec §5) -->
+    <string name="follo_heading_cd">The phone is pointing %1$s, true north</string>
+    <string name="follo_heading_poor_cd">The phone is pointing %1$s, roughly: the compass needs calibrating. Tap for how</string>
+    <string name="follo_compass_calibrate">Compass needs calibrating: move the phone in a figure 8 away from metal.</string>
 
     <string name="follo_setup_title">Set up FOLLO Tracks?</string>
     <string name="follo_setup_msg">This phone will share its location with FOLLO (%1$s) as tracker %2$s, only during search hours and inside the search area.\n\nOnly tap Set up if this link came from FOLLO.</string>

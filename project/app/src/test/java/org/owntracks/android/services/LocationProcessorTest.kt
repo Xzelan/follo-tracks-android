@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.kotlin.any
@@ -18,6 +19,7 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
+import org.mockito.kotlin.whenever
 import org.owntracks.android.data.repos.FolloDiagRepo
 import org.owntracks.android.data.repos.FolloStatusRepo
 import org.owntracks.android.data.repos.LocationRepo
@@ -382,5 +384,179 @@ class LocationProcessorTest {
     locationProcessor.onLocationChanged(gpsLocation, MessageLocation.ReportType.DEFAULT)
 
     verify(messageProcessor, times(2)).queueMessageForSending(any())
+  }
+
+  // ── "Share everywhere I go" (Alex, 22 Nov 2026; NEXT_BUILD_SPEC_20261122.md §D) ─────────────────────────────
+
+  @org.junit.After
+  fun everywhereOffAgain() {
+    org.owntracks.android.support.FolloEverywhere.set(false)
+    org.owntracks.android.support.FolloEverywhere.noticeDone()
+  }
+
+  /** Standing by (Manual) 11 km outside the only circle, with no window open at all: every rule says "not sent". */
+  private fun closedStatus() =
+      mock<FolloStatusRepo> {
+        on { status } doReturn
+            MutableStateFlow<FolloStatusRepo.Status?>(
+                FolloStatusRepo.Status(MessageFollo().apply { wins = listOf(listOf(JsonPrimitive("TEST"), JsonPrimitive(0), JsonPrimitive(1))) }, 0L))
+      }
+
+  private suspend fun TestScope.processorWith(messageProcessor: MessageProcessor, preferences: Preferences, status: FolloStatusRepo, repo: LocationRepo = LocationRepo()) =
+      LocationProcessor(
+          messageProcessor,
+          preferences,
+          repo,
+          heldSearchAtZero(),
+          mock<DeviceMetricsProvider>(),
+          mock<WifiInfoProvider>(),
+          this,
+          Dispatchers.Unconfined,
+          SimpleIdlingResource("publishResponseMessageIdlingResource", false),
+          SimpleIdlingResource("mockLocationIdlingResource", false),
+          false,
+          mock<FolloDiagRepo>(),
+          status,
+      )
+
+  private fun standingByPreferences() =
+      mock<Preferences> {
+        on { maxImplausibleSpeedKmh } doReturn 0
+        on { ignoreInaccurateLocations } doReturn 0
+        on { discardNetworkLocationThresholdSeconds } doReturn 0
+        on { fusedRegionDetection } doReturn false
+        on { monitoring } doReturn MonitoringMode.Manual
+        on { setupCompleted } doReturn true
+        on { tid } doReturn StringMaxTwoAlphaNumericChars("AB")
+      }
+
+  @Test
+  fun `with share everywhere on, a fix far outside every circle with no window open is sent and says ev 1`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = standingByPreferences()
+    val lp = processorWith(messageProcessor, preferences, closedStatus())
+
+    lp.onEverywhereOn(nowMs = 0L) // (the made-up fixes here are dated 1970)
+    verify(preferences).monitoring = MonitoringMode.Move // the phone puts itself in Move, at once
+    lp.onLocationChanged(fixAt(0.1, 1_000_000L), MessageLocation.ReportType.DEFAULT)
+    lp.onLocationChanged(fixAt(0.2, 1_005_000L), MessageLocation.ReportType.DEFAULT)
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    for (m in captor.allValues) assertEquals(1, (m as MessageLocation).ev)
+    assertEquals(0.2, (captor.secondValue as MessageLocation).latitude, 1e-9)
+    verify(preferences, never()).monitoring = MonitoringMode.Manual // and never stands itself by
+  }
+
+  @Test
+  fun `with share everywhere off the same fix is not sent, and nothing says ev`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val lp = processorWith(messageProcessor, movingPreferences(), closedStatus())
+
+    lp.onLocationChanged(fixAt(0.1, 1_000_000L), MessageLocation.ReportType.DEFAULT) // outside: the hello
+    lp.onLocationChanged(fixAt(0.0, 1_005_000L), MessageLocation.ReportType.DEFAULT) // inside the circle, no window: not sent
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(1)).queueMessageForSending(captor.capture())
+    val hello = captor.firstValue as MessageHello
+    assertEquals("out", hello.src)
+    assertNull(hello.ev)
+  }
+
+  @Test
+  fun `a check-in under share everywhere posts its fix wherever the phone is`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val lp = processorWith(messageProcessor, standingByPreferences(), closedStatus())
+    lp.onEverywhereOn(nowMs = 0L)
+
+    assertTrue(lp.onCheckInLocation(fixAt(0.1, 1_000_000L), LocationProcessor.CheckInSource.OPEN))
+    lp.onCheckInWithoutFix(LocationProcessor.CheckInSource.PUSH) // no fix came: the hello it sends today, saying ev
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    assertEquals(1, (captor.firstValue as MessageLocation).ev)
+    assertEquals(1, (captor.secondValue as MessageHello).ev)
+  }
+
+  @Test
+  fun `turning share everywhere off outside a search stands the phone by with a location-free hello, and nothing more leaves`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = movingPreferences()
+    whenever(preferences.setupCompleted).thenReturn(true)
+    val repo = LocationRepo()
+    val lp = processorWith(messageProcessor, preferences, noStatus(), repo)
+    lp.onEverywhereOn(nowMs = System.currentTimeMillis() - 1_000)
+    lp.onLocationChanged(fixAt(0.1, System.currentTimeMillis()), MessageLocation.ReportType.DEFAULT) // sent, ev 1
+
+    lp.onEverywhereOff()
+    assertFalse(org.owntracks.android.support.FolloEverywhere.isOn)
+    lp.onLocationChanged(fixAt(0.1, System.currentTimeMillis() + 5_000), MessageLocation.ReportType.DEFAULT) // judged by the gate again
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    assertEquals(1, (captor.firstValue as MessageLocation).ev)
+    val hello = captor.secondValue as MessageHello
+    assertEquals("out", hello.src)
+    assertNull(hello.ev)
+    verify(preferences, org.mockito.kotlin.atLeastOnce()).monitoring = MonitoringMode.Manual
+  }
+
+  @Test
+  fun `turning share everywhere off inside a search with its window open just carries on, without ev`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = movingPreferences()
+    whenever(preferences.setupCompleted).thenReturn(true)
+    val lp = processorWith(messageProcessor, preferences, noStatus())
+    lp.onEverywhereOn(nowMs = System.currentTimeMillis() - 1_000)
+    val t = System.currentTimeMillis()
+    lp.onLocationChanged(fixAt(0.001, t), MessageLocation.ReportType.DEFAULT)
+
+    lp.onEverywhereOff(byServer = true)
+    assertTrue(org.owntracks.android.support.FolloEverywhere.serverOffNotice.value)
+    lp.onLocationChanged(fixAt(0.002, t + 5_000), MessageLocation.ReportType.DEFAULT)
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    assertEquals(1, (captor.firstValue as MessageLocation).ev)
+    assertNull((captor.secondValue as MessageLocation).ev)
+    verify(preferences, never()).monitoring = MonitoringMode.Manual
+  }
+
+  /** Spec §H (found in the live check, 22 Nov 2026): the switch-on check-in had sent a fix taken 2 s before the OK. */
+  @Test
+  fun `a fix taken before the OK is never sent under the mode, one at or after it is`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val preferences = movingPreferences()
+    val lp = processorWith(messageProcessor, preferences, closedStatus())
+    val ok = 2_000_000L
+    lp.onEverywhereOn(nowMs = ok)
+
+    lp.onLocationChanged(fixAt(0.1, ok - 1_000), MessageLocation.ReportType.DEFAULT) // 1 s before the OK, outside: dropped
+    assertFalse(lp.everywhereCovers(fixAt(0.1, ok - 1_000)))
+    verify(messageProcessor, never()).queueMessageForSending(any())
+    verify(preferences, never()).monitoring = MonitoringMode.Manual // and the phone, in the mode, is not stood by for it
+
+    lp.onLocationChanged(fixAt(0.1, ok), MessageLocation.ReportType.DEFAULT) // at the OK: sent
+    lp.onLocationChanged(fixAt(0.1, ok + 5_000), MessageLocation.ReportType.DEFAULT)
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    for (m in captor.allValues) assertEquals(1, (m as MessageLocation).ev)
+  }
+
+  @Test
+  fun `a fix taken before the OK is judged by the normal gate like any other fix`() = runTest {
+    val messageProcessor = mock<MessageProcessor>()
+    val lp = processorWith(messageProcessor, movingPreferences(), noStatus()) // the TEST window is open
+    val ok = 2_000_000L
+    lp.onEverywhereOn(nowMs = ok)
+
+    lp.onLocationChanged(fixAt(0.001, ok - 1_000), MessageLocation.ReportType.DEFAULT) // inside the search: goes, without ev
+    // a check-in holding only the fix from before the OK, outside: the location-free hello, never the position
+    assertTrue(lp.onCheckInLocation(fixAt(0.1, ok - 1_000), LocationProcessor.CheckInSource.OPEN))
+
+    val captor = argumentCaptor<MessageBase>()
+    verify(messageProcessor, times(2)).queueMessageForSending(captor.capture())
+    assertNull((captor.firstValue as MessageLocation).ev)
+    assertEquals(1, (captor.secondValue as MessageHello).ev)
   }
 }

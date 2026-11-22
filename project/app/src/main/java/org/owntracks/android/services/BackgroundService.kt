@@ -105,6 +105,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   @Inject lateinit var folloDiagRepo: FolloDiagRepo
 
+  @Inject lateinit var folloOfflineRepo: org.owntracks.android.data.repos.FolloOfflineRepo
+
   @Inject lateinit var geocoderProvider: GeocoderProvider
 
   @Inject lateinit var contactsRepo: ContactsRepo
@@ -113,6 +115,11 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
   /** Created with the service, so the walking track also records while the screen is off. */
   @Inject lateinit var folloTrackRepo: org.owntracks.android.data.repos.FolloTrackRepo
+
+  // FP055 (19 Nov 2026): created with the service so the areas the phone has been to are noted with the screen off too
+  @Inject lateinit var folloScopeRepo: org.owntracks.android.data.repos.FolloScopeRepo
+  /** Watches the send queue for the two-way symbol (19 Nov 2026), also while the screen is closed */
+  @Inject lateinit var folloLinkRepo: org.owntracks.android.data.repos.FolloLinkRepo
 
   @Inject lateinit var runThingsOnOtherThreads: RunThingsOnOtherThreads
 
@@ -245,8 +252,20 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         launch { setupGeofences() }
         // Power button (13 Nov 2026): Off stops every location request here, on again starts them as at a launch
         launch { FolloPower.offState.collect { onPower(it) } }
+        // "Share everywhere I go" (22 Nov 2026): the notification says so while it is on; and while it is on the phone
+        // is in Move whatever happened meanwhile (turned Off and on again, the process restarted)
+        launch {
+          org.owntracks.android.support.FolloEverywhere.onState.collect { on ->
+            if (on && !FolloPower.isOff && preferences.setupCompleted && preferences.monitoring != MonitoringMode.Move) {
+              preferences.monitoring = MonitoringMode.Move
+            }
+            ongoingNotification.setMonitoringMode(preferences.monitoring)
+          }
+        }
         // "No fix on open" (1 Nov 2026): the second judgement after a hello needs a fresh fix
         launch { locationProcessor.secondStepFixRequests.collect { folloCheckIn(it, secondStep = true) } }
+        // FP034 (16 Nov 2026): the offline map finished saving or stopped part-way: tell base camp its new percent
+        launch { folloOfflineRepo.mapCheckIns.collect { locationProcessor.onMapCheckIn() } }
         // Near-circle watch (2 Nov 2026): a window opening, circles arriving or the phone standing by turn it on
         launch {
           while (true) {
@@ -698,6 +717,10 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       off -> shutLocationOff(announce = was == false)
       was == true -> {
         Timber.i("FOLLO power: back on, starting as at a launch")
+        // "Share everywhere I go" stays chosen while the phone is Off and carries on when it is turned back on
+        if (org.owntracks.android.support.FolloEverywhere.isOn && preferences.monitoring != MonitoringMode.Move) {
+          preferences.monitoring = MonitoringMode.Move
+        }
         setupAndStartService()
         setupGeofences()
       }
@@ -814,6 +837,12 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
               Timber.i(
                   "check-in: fix of ${l.accuracy.toInt()} m (${l.provider}, ${ageMs / 1000} s old), waiting for a better one"
               )
+              return
+            }
+            // "Share everywhere I go" (spec §H, 22 Nov 2026): a fix taken before the OK is not this check-in's fix;
+            // it waits for one taken after (or the hello goes without one after the usual 15 s)
+            if (org.owntracks.android.support.FolloEverywhere.isOn && !locationProcessor.everywhereCovers(l)) {
+              Timber.i("check-in: fix taken before share everywhere was turned on, waiting for a new one")
               return
             }
             if (!done.compareAndSet(false, true)) return
@@ -1073,6 +1102,10 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
 
       if (lastLocation != null && preferences.notificationLocation) {
             reverseGeocodedText.ifBlank { lastLocation!!.toLatLng().toDisplayString() }
+          } else if (org.owntracks.android.support.FolloEverywhere.isOn) {
+            // "Share everywhere I go" (22 Nov 2026): the notification keeps saying so (this used to put the app's
+            // name back as the title after every posted fix)
+            getString(R.string.follo_everywhere_notif)
           } else {
             getString(R.string.app_name)
           }

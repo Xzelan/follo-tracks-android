@@ -22,6 +22,8 @@ class MessageHello(
     @SerialName("m") var m: Int? = null,
     @SerialName("tid") var tid: String? = null,
     @SerialName("fd") var fd: FolloDiag? = null,
+    /** "Share everywhere I go" (22 Nov 2026): 1 while that mode is on, else left out of the body. */
+    @SerialName("ev") var ev: Int? = null,
 ) : MessageBase(), MessageWithId {
   @Transient override var messageId: MessageId = ZeroMessageId
 

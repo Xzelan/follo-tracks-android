@@ -39,6 +39,33 @@
             app:drawableTopCompat="@drawable/ic_follo_power" />
     </FrameLayout>
 
+    <!-- FP055 (19 Nov 2026): a phone that has not been to any of its search areas shows no map at all, only these
+         words, on the mask's grey. Clickable, so nothing behind it gets a touch. Also shown (without the words) for the
+         moment before the app knows which search area to show, so the map is never seen where the phone is. -->
+    <FrameLayout
+        android:id="@+id/waitCover"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/follo_mask"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/waitText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="24dp"
+            android:layout_marginEnd="24dp"
+            android:gravity="center"
+            android:lineSpacingMultiplier="1.15"
+            android:text="@string/follo_waiting_area"
+            android:textColor="@color/follo_white"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+    </FrameLayout>
+
     <!-- Sideways the Samsung's status bar runs across the top: a strip in the banner's colour behind it, so the status
          panel at the top right hangs straight under it (14 Nov 2026). Upright the banner itself goes under the status bar. -->
     <View
@@ -58,6 +85,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:background="@color/follo_grey"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:elevation="6dp"
         android:orientation="vertical"
         android:paddingStart="20dp"
@@ -65,14 +94,36 @@
         android:paddingEnd="14dp"
         android:paddingBottom="10dp">
 
-        <TextView
-            android:id="@+id/title"
+        <!-- The title and, at the right end of its first line, the two-way symbol (19 Nov 2026) -->
+        <LinearLayout
+            android:id="@+id/titleRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:lineSpacingMultiplier="1.1"
-            android:textColor="@color/follo_white"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:baselineAligned="false"
+            android:clipChildren="false"
+            android:gravity="top"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:lineSpacingMultiplier="1.1"
+                android:textColor="@color/follo_white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <org.owntracks.android.ui.main.FolloLinkChip
+                android:id="@+id/link"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="0dp"
+                android:layout_marginTop="-8dp"
+                android:layout_marginEnd="-8dp"
+                android:layout_marginBottom="-8dp"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/sub"
@@ -175,15 +226,15 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- The notice (when shown) and the card, just above the bottom band. Padding rather than margins, so their shadows
-         are not cut off; MainActivity sets the bottom padding to the band's height. Not clickable: a touch beside the
-         card goes to the map or the band. Sideways (14 Nov 2026) it is as wide as the status panel, hard into the right
-         side, sitting on the band. -->
+    <!-- The notices, just above the bottom band (19 Nov 2026: the card is gone; who this phone is and when it last
+         sent are behind a tap on the two-way symbol, the power button is under "…"). Padding rather than margins, so
+         their shadows are not cut off; MainActivity sets the bottom padding to the band's height. Not clickable: a
+         touch beside a notice goes to the map or the band. -->
     <LinearLayout
         android:id="@+id/bottom"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
+        android:layout_gravity="bottom"
         android:elevation="8dp"
         android:clipToPadding="false"
         android:orientation="vertical"
@@ -192,13 +243,12 @@
         android:paddingEnd="16dp"
         android:paddingBottom="24dp">
 
-        <!-- "No search area loaded yet…": just above the card until the wake-up circles arrive (13 Nov 2026; it was
-             the banner's last line) -->
+        <!-- "No search area loaded yet…": until the wake-up circles arrive (13 Nov 2026) -->
         <TextView
             android:id="@+id/notice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/bg_follo_notice"
             android:elevation="6dp"
             android:lineSpacingMultiplier="1.1"
@@ -212,67 +262,26 @@
             android:textStyle="bold"
             android:visibility="gone" />
 
-        <!-- The card: who this phone is and when it last sent, the power button at its right (14 Nov 2026; it was at
-             the banner's top right). Press and hold the card = check in now; a touch that starts on the power button is
-             the button's alone. -->
-        <LinearLayout
-            android:id="@+id/card"
+        <!-- The warning notes that were on the card (battery saver on: a tap opens that setting; notifications off) -->
+        <TextView
+            android:id="@+id/note"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_follo_card"
-            android:baselineAligned="false"
-            android:clickable="true"
-            android:elevation="8dp"
-            android:focusable="true"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingTop="13dp"
-            android:paddingEnd="14dp"
-            android:paddingBottom="13dp">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/who"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/follo_text"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/last"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:textColor="@color/follo_subtext"
-                    android:textSize="15sp" />
-
-                <TextView
-                    android:id="@+id/note"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/follo_note"
-                    android:textSize="14sp"
-                    android:visibility="gone" />
-            </LinearLayout>
-
-            <org.owntracks.android.ui.main.FolloPowerButton
-                android:id="@+id/power"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="12dp"
-                android:visibility="gone" />
-        </LinearLayout>
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_follo_notice"
+            android:elevation="6dp"
+            android:lineSpacingMultiplier="1.1"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/follo_white"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
     </LinearLayout>
 
-    <!-- The phone's own position (Alex 13-14 Nov 2026): just above the right end of the card, whenever the app has a
+    <!-- The phone's own position (Alex 13-14 Nov 2026): just above the bottom band on the right, whenever the app has a
          position. Press and hold = share it (with "GDA2020" and the MGA grid reference). MainActivity places it. -->
     <TextView
         android:id="@+id/coords"
@@ -294,7 +303,31 @@
         android:textStyle="bold"
         android:visibility="gone" />
 
-    <!-- The recentre button (wording page, 13 Nov 2026: four arrows pointing in): top left, level with the rotate button,
+    <!-- The compass heading (Cam Allport 15 Nov 2026, spec §5 of NEXT_VERSION_SPEC_20261115): "112°  ESE" with a small
+         dial, the same pill as the position, just above the bottom band on the left, only while the Compass
+         button under "…" is on (19 Nov 2026). MainActivity places it and draws the dial. -->
+    <TextView
+        android:id="@+id/heading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/bg_follo_coords"
+        android:drawablePadding="6dp"
+        android:elevation="4dp"
+        android:fontFeatureSettings="tnum"
+        android:gravity="center_vertical"
+        android:maxLines="1"
+        android:paddingStart="8dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="5dp"
+        android:textColor="@color/follo_white"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- The recentre button (wording page, 13 Nov 2026: four arrows pointing in): top left, level with the "…" button,
          only while the map is held where it was moved by hand. A tap follows again at walking scale. -->
     <ImageButton
         android:id="@+id/recentre"
@@ -311,22 +344,37 @@
         android:src="@drawable/ic_follo_recentre"
         android:visibility="gone" />
 
-    <!-- The rotate button (wording page tile R, 14 Nov 2026): over the map at the top right, 12 dp under the banner
-         (sideways, under the status bar, clear of the navigation bar). Each tap turns the screen a quarter turn
-         clockwise: 90, 180, 270, then upright again (FolloScreenTurner). MainActivity sets its top and end margins. -->
-    <ImageButton
-        android:id="@+id/rotate"
+    <!-- The "…" button (Alex 19 Nov 2026, SIMPLE_MODE_SPEC §1): where the rotate button was, 10 dp under the banner at
+         the top right (sideways, under the status bar, just left of the status panel). A tap shows or hides the column
+         of layer and function buttons under it (made in MainActivity). MainActivity sets its top and end margins. -->
+    <org.owntracks.android.ui.main.FolloMenuButton
+        android:id="@+id/more"
         android:layout_width="40dp"
         android:layout_height="40dp"
         android:layout_gravity="top|end"
         android:layout_marginTop="12dp"
         android:layout_marginEnd="12dp"
-        android:background="@drawable/bg_follo_round"
-        android:contentDescription="@string/follo_rotate"
-        android:elevation="4dp"
-        android:padding="7dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_follo_rotate" />
+        android:contentDescription="@string/follo_more"
+        android:visibility="gone" />
+
+    <!-- A tap on the two-way symbol: who this phone is and when it last sent, for 4 seconds, under the symbol -->
+    <TextView
+        android:id="@+id/linkBubble"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginStart="16dp"
+        android:background="@drawable/bg_follo_bubble"
+        android:elevation="12dp"
+        android:lineSpacingMultiplier="1.15"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
+        android:textAlignment="viewEnd"
+        android:textColor="@color/follo_white"
+        android:textSize="14sp"
+        android:visibility="gone" />
 
     <!-- The full-screen "Always" step (Alex 15 Nov 2026, FOLLO Planner `tracks-while-using-block`, field review bug 5:
          the red banner alone was ignored). Shown while location is only While Using (Android 10+), over everything (raised above the panels' elevation); it

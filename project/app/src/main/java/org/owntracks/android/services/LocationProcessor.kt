@@ -27,6 +27,7 @@ import org.owntracks.android.location.geofencing.Geofence
 import org.owntracks.android.model.messages.AddMessageStatus
 import org.owntracks.android.model.messages.MessageLocation
 import org.owntracks.android.model.messages.MessageHello
+import org.owntracks.android.support.FolloEverywhere
 import org.owntracks.android.support.FolloPower
 import org.owntracks.android.model.messages.MessageLocation.Companion.fromLocation
 import org.owntracks.android.model.messages.MessageStatus
@@ -181,6 +182,8 @@ constructor(
     TOKEN("token"),
     /** A fix the phone would have posted was outside the search: dropped, phone stood by (Alex, 1 Nov 2026). */
     OUT("out"),
+    /** The offline map finished saving or stopped part-way (FP034, 16 Nov 2026): the new fd.of for base camp. */
+    MAP("map"),
   }
 
   /** [location] null = the hello went without a fix (none came in time, 15 Nov 2026). */
@@ -246,13 +249,21 @@ constructor(
   }
 
   /** Judge a fix about to be posted; HOLD keeps it on the phone (tracking goes on), STANDBY drops every held fix. */
-  private suspend fun judgeFix(location: Location, trigger: MessageLocation.ReportType, checkIn: Boolean): FolloRules.GateVerdict {
-    val beyond = outsideHeldSearchM(location)
+  private suspend fun judgeFix(
+      location: Location,
+      trigger: MessageLocation.ReportType,
+      checkIn: Boolean,
+      everywhere: Boolean = false,
+  ): FolloRules.GateVerdict {
+    // "Share everywhere I go" (22 Nov 2026): the circles, the boundary and the time windows are not looked at, and
+    // nothing is held back at an edge (FolloRules.gateVerdictWith)
+    val beyond = if (everywhere) 0.0 else outsideHeldSearchM(location)
     val now = System.currentTimeMillis()
     val verdict =
         synchronized(heldLock) {
+          if (everywhere) heldFixes.clear()
           if (beyond > 0.0 && outsideSinceMs == null) outsideSinceMs = now
-          FolloRules.gateVerdict(beyond, outsideSinceMs, now, preferences.monitoring, checkIn).also { v ->
+          FolloRules.gateVerdictWith(everywhere, beyond, outsideSinceMs, now, preferences.monitoring, checkIn).also { v ->
             when (v) {
               FolloRules.GateVerdict.SHARE -> {
                 outsideSinceMs = null
@@ -337,6 +348,7 @@ constructor(
             m = preferences.monitoring.value,
             tid = preferences.tid.toString(),
             fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+            ev = FolloRules.everywhereWire(FolloEverywhere.isOn),
         ),
     )
   }
@@ -347,7 +359,9 @@ constructor(
    */
   suspend fun onCheckInLocation(location: Location, src: CheckInSource, secondStep: Boolean = false): Boolean {
     if (FolloPower.isOff) return false
-    val inside = insideHeldSearch(location)
+    // "Share everywhere I go" (22 Nov 2026): a check-in's fix is posted wherever the phone is, unless it was taken
+    // before the OK (spec §H): that one is judged like any other fix
+    val inside = everywhereCovers(location) || insideHeldSearch(location)
     return when (FolloRules.checkInAction(inside, secondStep)) {
       FolloRules.CheckInAction.POST_FIX -> {
         Timber.i("check-in (${src.wire}${if (secondStep) ", 2nd step" else ""}): inside the search, posting the position")
@@ -403,6 +417,25 @@ constructor(
     return onCheckInLocation(location, src, secondStep = true)
   }
 
+  /**
+   * FP034 (16 Nov 2026): the offline map finished saving (or stopped part-way): a location-free hello carrying the new
+   * percent (fd.of), so base camp's phone table turns its map tick green without the app being reopened. No fix, no
+   * second step, and it never takes the place of an open / push hello waiting for its reply. False while Off.
+   */
+  fun onMapCheckIn(): Boolean {
+    if (FolloPower.isOff || !preferences.setupCompleted) return false
+    messageProcessor.queueMessageForSending(
+        MessageHello(
+            src = CheckInSource.MAP.wire,
+            m = preferences.monitoring.value,
+            tid = preferences.tid.toString(),
+            fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+            ev = FolloRules.everywhereWire(FolloEverywhere.isOn),
+        ),
+    )
+    return true
+  }
+
   private fun queueHello(src: CheckInSource, location: Location?) {
     synchronized(pendingHelloLock) { pendingHello = PendingHello(location, src) }
     messageProcessor.queueMessageForSending(
@@ -411,6 +444,7 @@ constructor(
             m = preferences.monitoring.value,
             tid = preferences.tid.toString(),
             fd = folloDiagRepo.build(MessageLocation.ReportType.USER, preferences.monitoring),
+            ev = FolloRules.everywhereWire(FolloEverywhere.isOn),
         ),
     )
   }
@@ -554,7 +588,19 @@ constructor(
         }
       }
     }
+    // "Share everywhere I go" (Alex, 22 Nov 2026): the ONE read of the flag for this fix. It decides both whether the
+    // rules below are skipped and whether the body says `ev: 1`, so a fix that leaves under the mode always says so
+    // and a fix judged after the switch-off never leaves by it.
+    // A fix taken BEFORE the OK was tapped is not covered by the mode (spec §H): it goes only if the normal gate passes
+    // it, without `ev`; outside a search it is simply dropped (the phone, now in the mode, is not stood by for it).
+    val mode = FolloEverywhere.state
+    val everywhere = mode.on && FolloRules.everywhereMaySend(location.time, mode.since)
+    if (mode.on && !everywhere && outsideHeldSearchM(location) > 0.0) {
+      Timber.i("fix taken before share everywhere was turned on, outside the search ($trigger): not sent")
+      return Result.failure(Exception("taken before share everywhere was turned on: not sent"))
+    }
     if (
+        !everywhere &&
         preferences.monitoring === MonitoringMode.Quiet &&
             MessageLocation.ReportType.USER != trigger
     ) {
@@ -562,6 +608,7 @@ constructor(
       return Result.failure(Exception("message suppressed by monitoring settings: quiet"))
     }
     if (
+        !everywhere &&
         preferences.monitoring === MonitoringMode.Manual &&
             MessageLocation.ReportType.USER != trigger &&
             MessageLocation.ReportType.CIRCULAR != trigger
@@ -573,7 +620,7 @@ constructor(
     // FOLLO (Alex, 1 Nov 2026): nothing leaves the phone from outside every held circle and the held boundary —
     // whatever asked for it (tracking, ping, circle event, base camp's request, the person's own "check in now").
     // Edge hold (Alex, 2 Nov 2026): in Move a fix just outside is kept on the phone and tracking goes on.
-    when (judgeFix(location, trigger, checkIn)) {
+    when (judgeFix(location, trigger, checkIn, everywhere)) {
       FolloRules.GateVerdict.HOLD -> {
         Timber.i("fix just outside the search ($trigger): held on the phone")
         return Result.failure(Exception("just outside the search: held on the phone"))
@@ -589,14 +636,57 @@ constructor(
       Timber.i("held fix ${h.location.time} is inside after all: sending it")
       queueLocation(h.trigger, h.location, loadedWaypoints)
     }
-    queueLocation(trigger, location, loadedWaypoints)
+    queueLocation(trigger, location, loadedWaypoints, everywhere)
     return Result.success(Unit)
+  }
+
+  // ── "Share everywhere I go" (Alex, 22 Nov 2026; flag: support/FolloEverywhere, contract NEXT_BUILD_SPEC_20261122 §D) ──
+
+  /** Whether [location] may leave under the mode: it is on, and the fix was taken at or after the OK (spec §H). */
+  fun everywhereCovers(location: Location): Boolean =
+      FolloEverywhere.state.let { it.on && FolloRules.everywhereMaySend(location.time, it.since) }
+
+  /**
+   * The person chose the mode and confirmed the pop-up: the flag is set, anything held back at a circle's edge is
+   * forgotten (it was outside under the normal rules and stays unsent), and the phone puts ITSELF in Move at once.
+   */
+  fun onEverywhereOn(nowMs: Long = System.currentTimeMillis()) {
+    FolloEverywhere.set(true, nowMs = nowMs)
+    dropHeld()
+    lastOutHelloMs = null
+    if (preferences.monitoring != MonitoringMode.Move) preferences.monitoring = MonitoringMode.Move
+  }
+
+  /**
+   * Back to a normal search (the person's choice, or [byServer]: a status element arrived without `ev: 1`). The flag
+   * is cleared FIRST, so nothing judged from here on can leave by the mode. Then the phone judges itself by the normal
+   * rules: its newest fix inside a held circle whose window is open ⇒ it carries on (without `ev`); otherwise it stands
+   * by exactly as the gate does for a fix outside and says so with the location-free "out" hello. No position is sent
+   * here, and no fix is asked for.
+   */
+  suspend fun onEverywhereOff(byServer: Boolean = false) {
+    if (!FolloEverywhere.isOn) return
+    FolloEverywhere.set(false, byServer)
+    dropHeld()
+    if (FolloPower.isOff || !preferences.setupCompleted) return
+    val now = System.currentTimeMillis()
+    val fix = locationRepo.currentPublishedLocation.value?.takeIf { now - it.time <= CHECK_IN_FIX_MAX_AGE_MS }
+    if (fix != null && insideHeldSearch(fix)) {
+      Timber.i("share everywhere off: inside a search, carrying on by the normal rules")
+      return
+    }
+    val next = FolloRules.standbyMode(preferences.monitoring, heldCircles().isNotEmpty())
+    Timber.i("share everywhere off: not inside a search, ${preferences.monitoring} -> ${next ?: preferences.monitoring}")
+    if (next != null) preferences.monitoring = next
+    lastOutHelloMs = now
+    queueOffHello(CheckInSource.OUT.wire)
   }
 
   private fun queueLocation(
       trigger: MessageLocation.ReportType,
       location: Location,
       loadedWaypoints: List<WaypointModel>,
+      everywhere: Boolean = false,
   ) {
     val message =
         if (preferences.extendedData) {
@@ -616,6 +706,7 @@ constructor(
               trackerId = preferences.tid.toString()
               inregions = calculateInRegions(loadedWaypoints)
               fd = folloDiagRepo.build(trigger, preferences.monitoring)
+              ev = FolloRules.everywhereWire(everywhere)
             }
     Timber.v("Actually publishing location $location triggered by $trigger as message=$message")
     messageProcessor.queueMessageForSending(message)

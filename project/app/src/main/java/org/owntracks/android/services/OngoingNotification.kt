@@ -113,7 +113,11 @@ class OngoingNotification(private val context: Context, initialMode: MonitoringM
   // FOLLO: the notification says what the banner says. Move = the server has sharing on.
   private fun getMonitoringLabel(monitoringMode: MonitoringMode) = context.run {
     when (monitoringMode) {
-      MonitoringMode.Move -> getString(R.string.follo_sharing_title)
+      // "Share everywhere I go" (22 Nov 2026): the notification says it for as long as the mode is on
+      MonitoringMode.Move ->
+          getString(
+              if (org.owntracks.android.support.FolloEverywhere.isOn) R.string.follo_everywhere_notif
+              else R.string.follo_sharing_title)
       else -> getString(R.string.follo_notif_standby)
     }
   }

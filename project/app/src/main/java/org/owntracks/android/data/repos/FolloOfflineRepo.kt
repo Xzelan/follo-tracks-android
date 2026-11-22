@@ -17,7 +17,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -80,6 +82,16 @@ constructor(
   @Volatile
   var percent: Int? = null
     private set
+
+  /**
+   * FP034 (Alex 15 Nov 2026: "3 green ticks for every person before they leave basecamp"): the percent to check in with
+   * when a pass that fetched tiles ends at 100 % or stops part-way, so base camp's phone table (fd.of) moves without the
+   * app being reopened. BackgroundService sends the location-free hello (src "map").
+   */
+  private val mutableMapCheckIns = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+  val mapCheckIns: SharedFlow<Int> = mutableMapCheckIns
+  @Volatile private var mapCheckInSent: Int? = null
+  @Volatile private var mapCheckInAt = 0L
 
   private val prefs = context.getSharedPreferences("follo_offline", Context.MODE_PRIVATE)
   private val kicks = Channel<Unit>(Channel.CONFLATED)
@@ -145,6 +157,9 @@ constructor(
     prefs.edit().putLong(KEY_LAT, lat.toRawBits()).putLong(KEY_LON, lon.toRawBits()).apply()
     kick()
   }
+
+  /** The phone's last known position for the `km` rule (kept on the phone only), for the layers too (19 Nov 2026). */
+  fun lastPosition(): Pair<Double, Double>? = position()
 
   private fun position(): Pair<Double, Double>? =
       if (prefs.contains(KEY_LAT) && prefs.contains(KEY_LON))
@@ -245,6 +260,7 @@ constructor(
     missing = missingOf(source, plan)
     if (missing.isEmpty()) userAllowed = false
     show(plan.size, missing.size, missing.isNotEmpty() && online && !FolloOffline.mayFetch(metered, missing.size, settings.free, userAllowed))
+    checkInIfDue()
     when {
       missing.isEmpty() -> Unit
       ended == End.NETWORK -> kicks.trySend(Unit)
@@ -256,6 +272,17 @@ constructor(
         }
       }
     }
+  }
+
+  /** FP034: after a pass that fetched tiles, check in with the new percent (100 % at once, part-way at most once a minute). */
+  private fun checkInIfDue() {
+    val pct = percent ?: return
+    val now = android.os.SystemClock.elapsedRealtime()
+    if (!FolloRules.mapCheckInDue(fetched = true, percent = pct, lastSent = mapCheckInSent, sinceLastMs = now - mapCheckInAt)) return
+    if (!mutableMapCheckIns.tryEmit(pct)) return
+    mapCheckInSent = pct
+    mapCheckInAt = now
+    Timber.i("Offline map: the pass ended at $pct %, checking in")
   }
 
   private enum class End {

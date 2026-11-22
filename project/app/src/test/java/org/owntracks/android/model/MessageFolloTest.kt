@@ -47,7 +47,7 @@ class MessageFolloTest {
     val original =
         MessageFollo().apply {
           state = "outside"
-          search = "Michael Vrankovic search"
+          search = "Search One search"
           next = "Fri 6 Nov, 7:00 am"
           name = "Alex"
         }
@@ -55,7 +55,7 @@ class MessageFolloTest {
     assertTrue(json.contains("\"_type\":\"follo\""))
     val back = parser.fromJson(json) as MessageFollo
     assertEquals("outside", back.state)
-    assertEquals("Michael Vrankovic search", back.search)
+    assertEquals("Search One search", back.search)
     assertEquals("Fri 6 Nov, 7:00 am", back.next)
     assertEquals("Alex", back.name)
   }

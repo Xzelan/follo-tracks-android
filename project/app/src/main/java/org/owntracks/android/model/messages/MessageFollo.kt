@@ -21,7 +21,7 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
   override var messageId: MessageId = messageWithId.messageId
 
   var state: String? = null
-  /** Search name, e.g. "Michael Vrankovic search". */
+  /** Search name, e.g. "Search One search". */
   var search: String? = null
   /** Local time the current window closes, already formatted, e.g. "5:00 pm". */
   var until: String? = null
@@ -44,6 +44,12 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * server could not tell just now: the phone keeps what it has.
    */
   var drawv: String? = null
+  /**
+   * Version of this phone's layer list (19 Nov 2026, simple screen: hillshade, slope, contours, POI, tracklogs), "0" or
+   * null = no layers. The list itself comes from GET /lay when this differs from the version the phone holds
+   * (FolloLayRepo).
+   */
+  var layv: String? = null
   /**
    * Offline map (10 Nov 2026): which areas' circles to save imagery for and how much. Null = save nothing (what is
    * saved already stays).
@@ -91,10 +97,31 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
         org.owntracks.android.ui.main.FolloRules.Window(area, start, end)
       }
   /**
+   * The search areas the server already holds this phone's fixes for (FP055, 19 Nov 2026): [[area, newest fix epoch
+   * seconds], …], only areas this phone is allowed in. What the screen shows when the phone is not in a search area
+   * (FolloScope); merged into the phone's own record, which is never sent. Null = none, or an older server.
+   */
+  var been: kotlinx.serialization.json.JsonElement? = null
+
+  /** [been] as (area, time) rows; anything that is not a [string, number] row is skipped. */
+  fun beenRows(): List<Pair<String, Long>> =
+      (been as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { row ->
+        val r = row as? kotlinx.serialization.json.JsonArray ?: return@mapNotNull null
+        val area = (r.getOrNull(0) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        val t = (r.getOrNull(1) as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { !it.isString }?.content?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
+        area to t
+      }
+
+  /**
    * The newest builds the volunteers can install (server 14 Nov 2026): the third tick at the bottom right says whether
    * this phone has it. Null = an older server, or not known.
    */
   var latest: FolloLatest? = null
+  /**
+   * 1 = this server takes "Share everywhere I go" posts from this phone (22 Nov 2026): the row is offered in the
+   * Searches drop-down. Absent / anything else = it does not; a status that arrives without it switches the mode off.
+   */
+  var ev: Int? = null
   /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
   /**
@@ -102,6 +129,11 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * phone itself), and when there are exactly two it draws the line between them, for every member of the team.
    */
   var leaders: List<FolloLeader>? = null
+  /**
+   * 1 = this phone may see every phone in a search circle and every live-map search (GET /all; server SEE_ALL, Alex's
+   * iPhone 13 Nov 2026, the "Mobile Live Map" Samsung 18 Nov 2026). Absent = not this phone.
+   */
+  var all: Int? = null
   /**
    * Who this phone draws (server 21 Oct 2026, Alex: "a line leader should see all their team"): a leader gets every
    * teammate, a member gets the team's line leaders; never itself. Absent on older servers ⇒ fall back to [leaders].
@@ -154,6 +186,10 @@ class FolloLatest {
   var ios: Long? = null
   var android: Long? = null
   var androidv: String? = null
+  /** Since when (epoch seconds) the iOS / Android build named here has been the newest the volunteers can install
+   *  (22 Nov 2026, FP083: an older build is "in progress" for 48 h, then "wrong"). Null = not known. */
+  var iat: Long? = null
+  var aat: Long? = null
 }
 
 /** The pair partner: its tracker ID and its location topic (= the teammate's contact id on this phone). */

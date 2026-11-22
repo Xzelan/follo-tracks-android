@@ -48,6 +48,7 @@ class App : BaseApp() {
   override fun onCreate() {
     // Power button (13 Nov 2026): whether the app is turned Off is known before anything can ask for a position
     org.owntracks.android.support.FolloPower.load(this)
+    org.owntracks.android.support.FolloEverywhere.load(this)
     super.onCreate()
     StartBackgroundServiceReceiver.enable(this)
   }

@@ -12,8 +12,6 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.Surface
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.hypot
 
 /**
  * The way the phone is pointing, as a TRUE bearing of the screen's "up" (Alex, 21 Oct 2026: the map turns with the
@@ -32,7 +30,6 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
   private val magnetSensor: Sensor? = sensors.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
 
   private val rot = FloatArray(9)
-  private val screenRot = FloatArray(9)
   private val gravity = FloatArray(3)
   private val geomag = FloatArray(3)
   private var haveGravity = false
@@ -43,12 +40,31 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
   private var target: Float? = null
   private var targetAt = 0L
   private var unreliable = false
+  /** The sensor's own accuracy (SensorManager.SENSOR_STATUS_*); HIGH until it says otherwise. */
+  private var sensorAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+  /** The rotation vector's estimate of its heading error (degrees), when the phone gives one. */
+  private var accuracyDeg: Float? = null
 
   /**
    * The latest true heading, or null when there has been no usable reading for [STALE_MS] (or no compass at all), or
    * the sensor reports itself unreliable (needs a figure-of-eight).
    */
   fun heading(): Float? = target?.takeIf { !unreliable && SystemClock.elapsedRealtime() - targetAt < STALE_MS }
+
+  /**
+   * For the heading pill (Cam Allport, 15 Nov 2026): the latest true heading of the top of the screen as drawn, even
+   * while the sensor says it needs calibrating (the pill greys then, see [poor]); null without a recent reading.
+   */
+  fun pillHeading(): Float? = target?.takeIf { SystemClock.elapsedRealtime() - targetAt < STALE_MS }
+
+  /** True north (a fix gave the declination) or magnetic (no fix yet). */
+  fun isTrueNorth(): Boolean = declinationAt != null
+
+  /** The heading error estimate in degrees, when the phone gives one. */
+  fun accuracyDegrees(): Float? = accuracyDeg
+
+  /** Calibration is poor: the pill text dims and a tap explains the figure 8 (spec §5). */
+  fun poor(): Boolean = unreliable || FolloRules.compassPoor(sensorAccuracy, accuracyDeg)
 
   /** When the last reading arrived (elapsedRealtime), 0 if none yet. */
   fun lastReadingAt(): Long = targetAt
@@ -80,7 +96,11 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
 
   override fun onSensorChanged(event: SensorEvent) {
     when (event.sensor.type) {
-      Sensor.TYPE_ROTATION_VECTOR -> SensorManager.getRotationMatrixFromVector(rot, event.values)
+      Sensor.TYPE_ROTATION_VECTOR -> {
+        SensorManager.getRotationMatrixFromVector(rot, event.values)
+        // values[4] = the estimated heading accuracy in radians (-1 = unavailable), on phones that give one
+        accuracyDeg = event.values.getOrNull(4)?.takeIf { it >= 0f }?.let { Math.toDegrees(it.toDouble()).toFloat() }
+      }
       Sensor.TYPE_ACCELEROMETER -> {
         lowPass(event.values, gravity, haveGravity)
         haveGravity = true
@@ -93,19 +113,16 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
       }
       else -> return
     }
-    val (x, y) =
+    // The top of the screen as drawn (the display rotation includes the rotate button's turn); null = no direction
+    // to speak of. Pure maths in FolloRules.screenBearing, so it is unit-tested (16 Nov 2026).
+    val degrees =
         when (displayRotation()) {
-          Surface.ROTATION_90 -> SensorManager.AXIS_Y to SensorManager.AXIS_MINUS_X
-          Surface.ROTATION_180 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Y
-          Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_Y to SensorManager.AXIS_X
-          else -> SensorManager.AXIS_X to SensorManager.AXIS_Y
+          Surface.ROTATION_90 -> 90
+          Surface.ROTATION_180 -> 180
+          Surface.ROTATION_270 -> 270
+          else -> 0
         }
-    if (!SensorManager.remapCoordinateSystem(rot, x, y, screenRot)) return
-    // World (east, north) of screen-up (column 1) plus into-the-screen (minus column 2).
-    val east = screenRot[1] - screenRot[2]
-    val north = screenRot[4] - screenRot[5]
-    if (hypot(east, north) < 0.2f) return // pointing straight up or down: no direction to speak of
-    val magnetic = Math.toDegrees(atan2(east, north).toDouble()).toFloat()
+    val magnetic = FolloRules.screenBearing(rot, degrees) ?: return
     val h = ((magnetic + declination) % 360f + 360f) % 360f
     targetAt = SystemClock.elapsedRealtime()
     val old = target
@@ -117,8 +134,12 @@ class FolloCompass(private val activity: Activity, private val onChange: () -> U
   }
 
   override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-    if (sensor?.type == Sensor.TYPE_ROTATION_VECTOR || sensor?.type == Sensor.TYPE_MAGNETIC_FIELD)
-        unreliable = accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE
+    if (sensor?.type == Sensor.TYPE_ROTATION_VECTOR || sensor?.type == Sensor.TYPE_MAGNETIC_FIELD) {
+      val was = poor()
+      unreliable = accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE
+      sensorAccuracy = accuracy
+      if (poor() != was) onChange() // the pill greys or brightens
+    }
   }
 
   @Suppress("DEPRECATION")

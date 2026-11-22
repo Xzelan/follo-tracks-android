@@ -48,6 +48,16 @@ class Contact(id: String) : BaseObservable() {
       notifyPropertyChanged(BR.face)
     }
 
+  /** FOLLO (FP078): the team-mate's team, dot colour "#rrggbb" and vest (Y / O / P), as the server last sent them. */
+  var team: String? = null
+    private set
+
+  var teamColour: String? = null
+    private set
+
+  var vest: String? = null
+    private set
+
   fun setMessageCard(messageCard: MessageCard) {
     name = messageCard.name
     face = messageCard.face
@@ -60,6 +70,13 @@ class Contact(id: String) : BaseObservable() {
     if (latLng != messageLocation.toLatLng()) {
       Timber.v("Contact ${this.id} has moved to $latLng")
       latLng = messageLocation.toLatLng()
+    }
+    // FOLLO (FP078, 22 Nov 2026): the team, the dot's colour and the vest the server sends with a team-mate, kept for
+    // as long as the contact is. A reply from a server that sends none (no `tc`) leaves what is held.
+    if (messageLocation.teamColour != null) {
+      team = messageLocation.team
+      teamColour = messageLocation.teamColour
+      vest = messageLocation.vest
     }
     // FOLLO tids are 3 characters since 24 Oct 2026 (JE1 = first JE to register); upstream kept only 2
     trackerId = messageLocation.trackerId?.take(3) ?: messageLocation.topic.takeLast(2)

@@ -22,6 +22,9 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
   var grid: FolloGrid? = null
   /** The phone's own team (status `team`); its lines are the bold ones. */
   var ownTeam: String? = null
+  /** The Grids and Labels buttons under "…" (19 Nov 2026): the lines and the name tags, each on or off. */
+  var showLines = true
+  var showNames = true
 
   private val casing =
       Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -54,7 +57,7 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
     if (zoom < MIN_ZOOM_LINES) return
     val view = p.boundingBox
     if (!c.getClipBounds(clip)) return
-    for (a in g.areas) {
+    if (showLines) for (a in g.areas) {
       if (a.north < view.latSouth || a.south > view.latNorth || a.east < view.lonWest || a.west > view.lonEast) continue
       // the cells past a U-turn (15 Nov 2026): grey, thin for every team, under all the coloured lines
       for (t in a.teams) if (t.grey.isNotEmpty()) drawLines(c, p, t.grey, GREY_COLOR, OTHER_DP * density, 255)
@@ -62,7 +65,7 @@ class FolloGridOverlay(private val density: Float, scaledDensity: Float) : Overl
       for (t in a.teams) if (!FolloGrid.sameTeam(t.name, ownTeam)) drawTeam(c, p, t, own = false)
       for (t in a.teams) if (FolloGrid.sameTeam(t.name, ownTeam)) drawTeam(c, p, t, own = true)
     }
-    if (zoom < MIN_ZOOM_NAMES) return
+    if (zoom < MIN_ZOOM_NAMES || !showNames) return
     for (a in g.areas) {
       if (a.north < view.latSouth || a.south > view.latNorth || a.east < view.lonWest || a.west > view.lonEast) continue
       for (n in a.names) drawName(c, p, n)
