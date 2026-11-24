@@ -37,6 +37,10 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- "Save to my phone" on Android 7–9 only (Android 10+ saves through MediaStore with no permission); 25 Nov 2026 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- To access the network -->

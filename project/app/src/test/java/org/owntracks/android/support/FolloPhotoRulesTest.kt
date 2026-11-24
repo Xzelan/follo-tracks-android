@@ -191,4 +191,22 @@ class FolloPhotoRulesTest {
                  FolloPhotoRules.stateWords(p.copy(pGot = 40, pTotal = 100), listOf("a" to "p"), true, false))
     assertEquals("all sent", FolloPhotoRules.stateWords(p.copy(sentO = true), emptyList(), true, true))
   }
+
+  @Test
+  fun `save to my phone is offered for everything except possible remains`() {
+    val p = item("a", 1)
+    assertTrue(FolloPhotoRules.canSaveToPhone(p))
+    assertTrue(FolloPhotoRules.canSaveToPhone(p.copy(type = "video", oct = "video/mp4")))
+    assertFalse(FolloPhotoRules.canSaveToPhone(p.copy(tag = "find")))
+  }
+
+  @Test
+  fun `the copy saved to the phone is named by when it was taken`() {
+    val tz = java.util.TimeZone.getTimeZone("Australia/Hobart")
+    // a video taken 25 Nov 2026 08:18:51 AEST = 09:18:51 AEDT
+    val v = item("5a1b9c3d7e2f40a6b8c0", 1795558731311).copy(type = "video", oct = "video/mp4")
+    assertEquals("FOLLO_20261125_091851_5a1b.mp4", FolloPhotoRules.galleryName(v, tz))
+    assertEquals("FOLLO_20261125_091851_5a1b.jpg", FolloPhotoRules.galleryName(v.copy(type = "photo", oct = "image/jpeg"), tz))
+    assertEquals("FOLLO_20261125_091851_5a1b.heic", FolloPhotoRules.galleryName(v.copy(oct = "image/heic"), tz))
+  }
 }

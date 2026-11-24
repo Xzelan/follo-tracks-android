@@ -3700,7 +3700,11 @@ class MainActivity :
         when {
           off && kind == Kind.OFF && !clean -> listOf(FolloMenu.Function.POWER)
           !open -> emptyList()
-          scopeCovered -> listOf(FolloMenu.Function.POWER, FolloMenu.Function.SEARCHES) // WAITING: no map
+          // WAITING: no map. Photos & video stays reachable while the phone holds any (25 Nov 2026: "Save to my phone"
+          // is mostly wanted at home after the search, which is exactly when the phone is waiting)
+          scopeCovered ->
+              listOf(FolloMenu.Function.POWER, FolloMenu.Function.SEARCHES) +
+                  if (folloPhotoRepo.items.value.any { !it.del }) listOf(FolloMenu.Function.PHOTOS) else emptyList()
           else -> FolloMenu.Function.entries.filter { it != FolloMenu.Function.PHOTOS || photosOffered() }
         }
     fun vis(v: View, show: Boolean) {

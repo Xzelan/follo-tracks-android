@@ -185,6 +185,21 @@ object FolloPhotoRules {
     return null
   }
 
+  /**
+   * "Save to my phone" in the Photos & video list (Alex 25 Nov 2026, after a volunteer found nothing reaches the Gallery):
+   * offered for everything except ⚠ Possible remains, which stays in FOLLO Tracks (committee only).
+   */
+  fun canSaveToPhone(p: FolloPhoto): Boolean = p.tag != "find"
+
+  /** The Gallery album (DCIM/FOLLO Tracks: one folder that takes both photos and video). */
+  const val GALLERY_FOLDER = "FOLLO Tracks"
+
+  /** File name of the copy saved to the phone: FOLLO_20261125_081851_2470.mp4 (taken time, phone's zone, pid start). */
+  fun galleryName(p: FolloPhoto, tz: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+    val f = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).apply { timeZone = tz }
+    return "FOLLO_" + f.format(java.util.Date(p.t)) + "_" + p.pid.take(4) + "." + extOf(p.oct)
+  }
+
   fun extOf(ct: String): String =
       when (ct) {
         "image/jpeg" -> "jpg"

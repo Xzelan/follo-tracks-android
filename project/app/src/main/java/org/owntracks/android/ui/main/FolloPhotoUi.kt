@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.owntracks.android.data.repos.FolloPhotoRepo
+import org.owntracks.android.support.FolloGallery
 import org.owntracks.android.support.FolloPhoto
 import org.owntracks.android.support.FolloPhotoMaker
 import org.owntracks.android.support.FolloPhotoRules
@@ -73,6 +74,20 @@ class FolloPhotoUi(
    */
   private val askCamera =
       activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) open(video = false) else cameraRefused() }
+  /** The item waiting for the storage permission (Android 7–9 only) before "Save to my phone" can run. */
+  private var saveWaiting: FolloPhoto? = null
+  private val viewer by lazy { FolloPhotoViewer(activity) }
+
+  /** Redraws the open Photos & video list (its rows say "Saved to your phone"); null while it is closed. */
+  private var listRefresh: (() -> Unit)? = null
+  private val askStorage =
+      activity.registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        val p = saveWaiting
+        saveWaiting = null
+        if (p == null) return@registerForActivityResult
+        if (ok) saveToPhone(p)
+        else Toast.makeText(activity, "Not saved: FOLLO Tracks needs permission to save to your phone.", Toast.LENGTH_LONG).show()
+      }
 
   /** The 📷 button was tapped. */
   fun capture() {
@@ -178,6 +193,14 @@ class FolloPhotoUi(
       val b = withContext(Dispatchers.IO) { previewBitmap(f, video) }
       if (b != null) img.setImageBitmap(b)
     }
+    // 25 Nov 2026 (volunteer feedback): look at it properly before sending
+    img.setOnClickListener { viewer.show(f, video, { previewBitmap(f, video) }, null, emptyList()) }
+    box.addView(TextView(activity).apply {
+      text = if (video) "Tap the picture to play the video." else "Tap the picture to see it full size."
+      textSize = 13f
+      gravity = Gravity.CENTER_HORIZONTAL
+      setPadding(0, dp(4f), 0, dp(4f))
+    })
     val note = EditText(activity).apply {
       hint = "Note (optional)"
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -259,7 +282,7 @@ class FolloPhotoUi(
             val tv = row.getChildAt(1) as TextView
             iv.setImageBitmap(thumbs.getOrPut(p.pid) { thumbOf(p) })
             val head = (if (p.type == "video") "🎥 " else "📷 ") + time.format(Date(p.t)) + if (p.tag == "find") "  ⚠ Possible remains" else ""
-            tv.text = head + (p.note?.let { "\n“$it”" } ?: "") + "\n" + r.words(p)
+            tv.text = head + (p.note?.let { "\n“$it”" } ?: "") + "\n" + r.words(p) + if (savedPids().contains(p.pid)) "\nSaved to your phone" else ""
             return row
           }
         }
@@ -285,22 +308,101 @@ class FolloPhotoUi(
             .setTitle("Photos & video")
             .setView(box)
             .setPositiveButton("Close", null)
-            .setOnDismissListener { watch?.cancel() }
+            .setOnDismissListener {
+              watch?.cancel()
+              listRefresh = null
+            }
             .show()
+    listRefresh = { refresh() }
     watch = activity.lifecycleScope.launch { combine(r.items, r.wants, r.online) { _, _, _ -> }.collect { refresh() } }
     list.setOnItemClickListener { _, _, i, _ ->
       val p = rows.getOrNull(i) ?: return@setOnItemClickListener
-      MaterialAlertDialogBuilder(activity)
-          .setTitle(if (p.type == "video") "Delete this video?" else "Delete this photo?")
-          .setMessage("It goes from this phone and from FOLLO, including basecamp's copies. This cannot be undone.")
-          .setPositiveButton("Delete") { _, _ -> r.delete(p.pid) }
-          .setNegativeButton("Keep", null)
-          .show()
+      itemMenu(r, p)
     }
     dlg.toString()
   }
 
+  /**
+   * Tap on a row of the list (25 Nov 2026): the photo or video full screen (volunteer feedback), with Save to my phone · Delete ·
+   * Close. Save is left out for ⚠ Possible remains (committee only) and when the camera's file is no longer on the
+   * phone (it goes 7 days after FOLLO has it).
+   */
+  private fun itemMenu(r: FolloPhotoRepo, p: FolloPhoto) {
+    val what = if (p.type == "video") "video" else "photo"
+    val orig = r.file(p, "o")?.takeIf { it.isFile }
+    val saved = savedPids().contains(p.pid)
+    val caption =
+        when {
+          !FolloPhotoRules.canSaveToPhone(p) ->
+              "⚠ Possible remains: this $what stays in FOLLO Tracks. Only the committee can open it."
+          orig == null -> "This phone no longer has the full-size $what. FOLLO still has it."
+          saved -> "A copy is already in your phone's Gallery, in the FOLLO Tracks album."
+          else -> null
+        }
+    val actions = mutableListOf<FolloPhotoViewer.Action>()
+    if (FolloPhotoRules.canSaveToPhone(p) && orig != null)
+        actions += FolloPhotoViewer.Action(if (saved) "Save again" else "Save to my phone") { saveToPhone(p) }
+    actions += FolloPhotoViewer.Action("Delete") { dismiss -> confirmDelete(r, p, saved, dismiss) }
+    viewer.show(orig, p.type == "video", { fallbackOf(r, p) }, caption, actions)
+  }
+
+  /** What to show for a photo when the camera's file has gone: the bigger copy if the phone made one, else the thumb. */
+  private fun fallbackOf(r: FolloPhotoRepo, p: FolloPhoto): Bitmap? =
+      try {
+        val big = r.file(p, "p")?.takeIf { it.exists() }?.readBytes()
+        when {
+          big != null && p.pct == "image/avif" -> Coder().decode(big)
+          big != null && p.pct?.startsWith("image/") == true -> BitmapFactory.decodeByteArray(big, 0, big.size)
+          else -> thumbOf(p)
+        }
+      } catch (e: Exception) {
+        thumbOf(p)
+      }
+
+  private fun confirmDelete(r: FolloPhotoRepo, p: FolloPhoto, saved: Boolean, deleted: () -> Unit = {}) {
+    MaterialAlertDialogBuilder(activity)
+        .setTitle(if (p.type == "video") "Delete this video?" else "Delete this photo?")
+        .setMessage(
+            "It goes from this phone and from FOLLO, including basecamp's copies. This cannot be undone." +
+                if (saved) "\n\nThe copy you saved to your Gallery stays." else "")
+        .setPositiveButton("Delete") { _, _ ->
+          r.delete(p.pid)
+          deleted()
+        }
+        .setNegativeButton("Keep", null)
+        .show()
+  }
+
+  private fun savedPids(): Set<String> = prefs.getStringSet(KEY_SAVED, emptySet()) ?: emptySet()
+
+  /** Copies the camera's file into DCIM/FOLLO Tracks (FolloGallery), asking for storage first on Android 7–9. */
+  private fun saveToPhone(p: FolloPhoto) {
+    if (!FolloPhotoRules.canSaveToPhone(p)) return
+    if (FolloGallery.needsPermission() &&
+        ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+      saveWaiting = p
+      askStorage.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+      return
+    }
+    val src = repo().file(p, "o") ?: return
+    val app = activity.applicationContext
+    val what = if (p.type == "video") "Video" else "Photo"
+    Toast.makeText(activity, "Saving…", Toast.LENGTH_SHORT).show()
+    activity.lifecycleScope.launch {
+      val err = withContext(Dispatchers.IO) { runCatching { FolloGallery.save(app, src, p) }.exceptionOrNull() }
+      if (err == null) {
+        prefs.edit().putStringSet(KEY_SAVED, savedPids() + p.pid).apply()
+        listRefresh?.invoke()
+        Toast.makeText(app, "$what saved to your Gallery (FOLLO Tracks album).", Toast.LENGTH_LONG).show()
+      } else {
+        Timber.w(err, "save to phone failed for %s", p.pid)
+        Toast.makeText(app, "Could not save the ${what.lowercase()}: ${err.message}", Toast.LENGTH_LONG).show()
+      }
+    }
+  }
+
   companion object {
+    private const val KEY_SAVED = "saved_to_phone"
     private const val KEY_FILE = "file"
     private const val KEY_VIDEO = "video"
     private const val KEY_AT = "at"
