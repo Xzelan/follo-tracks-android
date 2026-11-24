@@ -223,6 +223,15 @@ constructor(
         .isNotEmpty()
   }
 
+  /** FP066 (23 Nov 2026): the held wake-up circles (search and Basecamp) the approach rings are drawn round. */
+  suspend fun heldWakeCircles(): List<FolloRules.Circle> = heldCircles()
+
+  /** FP066: the areas whose held circles count right now (a window of this phone open; "Basecamp" while any is). */
+  suspend fun countingAreasNow(): Set<String> {
+    val msg = folloStatusRepo.status.value?.message
+    return FolloRules.timedArea(heldCircles(), null, msg?.ends, msg?.windows(), System.currentTimeMillis() / 1000).first.map { it.area }.toSet()
+  }
+
   /** Metres beyond what counts right now (0 = inside, infinity = nothing counts). Also the near-circle watch's judge. */
   suspend fun outsideHeldSearchM(location: Location): Double {
     val msg = folloStatusRepo.status.value?.message

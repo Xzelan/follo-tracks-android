@@ -122,6 +122,17 @@ class MessageFollo(@Transient private val messageWithId: MessageWithId = Message
    * Searches drop-down. Absent / anything else = it does not; a status that arrives without it switches the mode off.
    */
   var ev: Int? = null
+  /**
+   * Photos & video (server 23 Nov 2026, docs/PHOTO_BUILD_SPEC_20261123.md): present = the server takes photos from this
+   * phone (the 📷 button may show); [FolloPho.w] = the copies basecamp asked THIS phone for and has not got yet. Absent =
+   * an older server, or photos switched off (PHO_ON): the button hides.
+   */
+  var pho: FolloPho? = null
+  /**
+   * FP066 (23 Nov 2026): the approach ring's margin in metres beyond an area's circles (server `APPR_M`). Absent = 1000.
+   * Outside every ring the phone takes no location at all.
+   */
+  var appr: Int? = null
   /** Superseded by [leaders] (21 Oct 2026); still parsed so older server replies load, no longer used. */
   var pair: FolloPair? = null
   /**
@@ -178,6 +189,17 @@ class FolloOff {
   var km: Double? = null
   var cap: Int? = null
   var free: Int? = null
+}
+
+/** The status element's `pho`: [on] = 1 while photos are switched on, [w] = [[pid, "p" | "o"], …] newest ask first. */
+@Serializable
+class FolloPho {
+  var on: Int? = null
+  var w: List<List<String>>? = null
+
+  /** [w] as (pid, tier) pairs; anything malformed is skipped. */
+  fun wants(): List<Pair<String, String>> =
+      w.orEmpty().mapNotNull { r -> if (r.size >= 2 && (r[1] == "p" || r[1] == "o")) r[0] to r[1] else null }
 }
 
 /** Newest volunteer builds (D1 meta 'appver'): TestFlight external build, Play closed-testing versionCode and name. */

@@ -57,11 +57,24 @@ object FolloEverywhere {
       if (prefs != null) return
       val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       current = State(p.getBoolean(KEY_ON, false), p.getLong(KEY_SINCE, 0L))
+      // 24 Nov 2026: a reinstall came back ON from a Google backup, without anyone tapping OK on this install. An "on"
+      // older than this install of the app was never OK'd here ⇒ off (the backup rules leave the file out as well).
+      val installed = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).firstInstallTime
+      }.getOrDefault(0L)
+      if (restoredOn(current.on, current.since, installed)) {
+        p.edit().putBoolean(KEY_ON, false).putLong(KEY_SINCE, 0L).commit()
+        current = State(false, 0L)
+        Timber.i("FOLLO share everywhere: off (restored from a backup, never OK'd on this install)")
+      }
       mutableOn.value = current.on
       mutableNotice.value = p.getBoolean(KEY_NOTICE, false)
       prefs = p
     }
   }
+
+  /** True when a stored "on" predates this install of the app (restored from a backup): it must not count. */
+  fun restoredOn(on: Boolean, since: Long, installedAt: Long): Boolean = on && installedAt > 0L && since < installedAt
 
   /** On or off; written before anyone is told, so a process that dies now still comes back right. */
   fun set(on: Boolean, byServer: Boolean = false, nowMs: Long = System.currentTimeMillis()) {

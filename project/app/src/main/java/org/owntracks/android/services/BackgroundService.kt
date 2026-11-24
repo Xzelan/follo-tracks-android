@@ -81,6 +81,7 @@ import org.owntracks.android.preferences.Preferences
 import org.owntracks.android.preferences.Preferences.Companion.PREFERENCES_THAT_WIPE_QUEUE_AND_CONTACTS
 import org.owntracks.android.preferences.types.MonitoringMode
 import org.owntracks.android.support.FolloPower
+import org.owntracks.android.ui.main.FolloRings
 import org.owntracks.android.ui.main.FolloRules
 import org.owntracks.android.preferences.types.MonitoringMode.Companion.getByValue
 import org.owntracks.android.services.worker.Scheduler
@@ -102,6 +103,13 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   @Inject lateinit var scheduler: Scheduler
 
   @Inject lateinit var locationProcessor: LocationProcessor
+
+  /** Photos & video (23 Nov 2026): made here too, so the queue works whenever the service runs, app open or not. */
+  @Inject lateinit var folloPhotoRepo: org.owntracks.android.data.repos.FolloPhotoRepo
+
+  /** FP066 (23 Nov 2026): which approach rings the phone is in, and the phone's status (for `appr`). */
+  @Inject lateinit var folloRingRepo: org.owntracks.android.data.repos.FolloRingRepo
+  @Inject lateinit var folloStatusRepoForRings: org.owntracks.android.data.repos.FolloStatusRepo
 
   @Inject lateinit var folloDiagRepo: FolloDiagRepo
 
@@ -266,6 +274,15 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
         launch { locationProcessor.secondStepFixRequests.collect { folloCheckIn(it, secondStep = true) } }
         // FP034 (16 Nov 2026): the offline map finished saving or stopped part-way: tell base camp its new percent
         launch { folloOfflineRepo.mapCheckIns.collect { locationProcessor.onMapCheckIn() } }
+        // FP066 (23 Nov 2026): a new ring margin from the server redraws the rings
+        launch {
+          var last: Int? = -1
+          folloStatusRepoForRings.status.collect { st ->
+            val a = st?.message?.appr
+            if (last != -1 && a != last) setupGeofences()
+            last = a
+          }
+        }
         // Near-circle watch (2 Nov 2026): a window opening, circles arriving or the phone standing by turn it on
         launch {
           while (true) {
@@ -300,6 +317,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
   override fun onDestroy() {
     Timber.v("Backgroundservice onDestroy")
     nearWatchCallback?.let { locationProviderClient.removeLocationUpdates(it) }
+    passiveCallback?.let { locationProviderClient.removeLocationUpdates(it) }
     folloDiagRepo.foregroundServiceRunning = false
     stopForeground(STOP_FOREGROUND_REMOVE)
     unregisterReceiver(powerBroadcastReceiver)
@@ -739,6 +757,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     locationProviderClient.removeLocationUpdates(callbackForReportType[MessageLocation.ReportType.DEFAULT]!!.value)
     folloCheckInCallback?.let { stopFolloCheckIn(it) }
     setNearWatch(FolloRules.WatchStage.OFF)
+    setPassive(false)
     significantMotionSensor.cancel()
     scheduler.cancelAllTasks()
     geofencingClient.removeGeofences(this)
@@ -764,9 +783,20 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       return
     }
     val transition: Int = event.geofenceTransition
+    // FP066: approach-ring events change which rings the phone is in (the OS's ENTER / EXIT is trusted)
+    var rings = folloRingRepo.inside.value
+    for (g in event.triggeringGeofences) {
+      val area = g.requestId?.let(FolloRings::areaOfId) ?: continue
+      rings = FolloRings.afterEvent(rings, area, transition == Geofence.GEOFENCE_TRANSITION_ENTER)
+    }
+    if (rings != folloRingRepo.inside.value) {
+      folloRingRepo.set(rings)
+      setupGeofences()
+      evaluateNearWatch()
+    }
     event.triggeringGeofences.forEach { triggeringGeofence ->
       val requestId = triggeringGeofence.requestId
-      if (requestId != null) {
+      if (requestId != null && FolloRings.areaOfId(requestId) == null) {
         try {
           waypointsRepo.get(requestId.toLong())?.run {
             Timber.d("onWaypointTransition triggered by geofencing event")
@@ -832,6 +862,7 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
           override fun onLocationResult(locationResult: LocationResult) {
             if (done.get()) return
             val l = locationResult.lastLocation
+            lifecycleScope.launch { ringFix(l) } // FP066: an opening's fix decides the rings at once
             val ageMs = System.currentTimeMillis() - l.time
             if (!FolloRules.usableCheckInFix(l.hasAccuracy(), l.accuracy, ageMs)) {
               Timber.i(
@@ -942,11 +973,62 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     )
   }
 
-  /** Whether the watch should run at all: standing by, holding circles that count now (an open search window). */
+  /**
+   * Whether the watch should run at all: standing by, holding circles that count now (an open search window) AND
+   * (FP066, 23 Nov 2026) the phone is inside that area's approach ring. Standing by outside every ring: no location
+   * request at all, only the ring geofences and the passive provider (fixes other apps cause).
+   */
   private suspend fun evaluateNearWatch() {
-    val wanted = !FolloPower.isOff && preferences.monitoring == MonitoringMode.Manual && locationProcessor.watchCirclesCountNow()
-    if (!wanted) setNearWatch(FolloRules.WatchStage.OFF)
+    val standingBy = !FolloPower.isOff && preferences.monitoring == MonitoringMode.Manual
+    val areas = if (standingBy) FolloRings.watchAreas(folloRingRepo.inside.value, locationProcessor.countingAreasNow()) else emptySet()
+    if (areas.isEmpty()) setNearWatch(FolloRules.WatchStage.OFF)
     else if (nearWatchStage == FolloRules.WatchStage.OFF) setNearWatch(FolloRules.WatchStage.FAR)
+    setPassive(standingBy && areas.isEmpty() && currentRings.isNotEmpty())
+  }
+
+  // ── FP066 approach rings (23 Nov 2026; FolloRings) ───────────────────────────────────────────
+  /** The rings handed to the OS at the last setupGeofences. */
+  @Volatile private var currentRings: List<FolloRings.Ring> = emptyList()
+  private var passiveCallback: LocationCallback? = null
+
+  /** A fix from anywhere (watch, check-in, passive): no worse than 500 m ⇒ it decides which rings the phone is in. */
+  private suspend fun ringFix(l: Location) {
+    if (FolloPower.isOff || currentRings.isEmpty()) return
+    val next = FolloRings.afterFix(folloRingRepo.inside.value, currentRings, l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else -1f)
+    if (next != folloRingRepo.inside.value) {
+      folloRingRepo.set(next)
+      setupGeofences()
+      evaluateNearWatch()
+    }
+  }
+
+  /** The passive provider (no power of its own) while standing by outside every ring. */
+  private fun setPassive(on: Boolean) {
+    if (on == (passiveCallback != null)) return
+    passiveCallback?.let { locationProviderClient.removeLocationUpdates(it) }
+    passiveCallback = null
+    if (!on || FolloPower.isOff || !requirementsChecker.hasLocationPermissions()) {
+      if (!on) Timber.i("approach rings: passive fixes off")
+      return
+    }
+    val cb =
+        object : LocationCallback {
+          override fun onLocationResult(locationResult: LocationResult) {
+            val l = locationResult.lastLocation
+            lifecycleScope.launch { ringFix(l) }
+          }
+
+          override fun onLocationError() {}
+
+          override fun onLocationAvailability(locationAvailability: LocationAvailability) {}
+        }
+    passiveCallback = cb
+    Timber.i("approach rings: outside every ring, passive fixes only")
+    locationProviderClient.requestLocationUpdates(
+        LocationRequest(fastestInterval = Duration.ofSeconds(30), priority = LocatorPriority.NoPower, interval = Duration.ofSeconds(60)),
+        cb,
+        runThingsOnOtherThreads.getBackgroundLooper(),
+    )
   }
 
   /** A watch fix: judged on the phone only. Inside (and good) => posted as a circle crossing; otherwise forgotten. */
@@ -955,6 +1037,8 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
       setNearWatch(FolloRules.WatchStage.OFF)
       return
     }
+    ringFix(l) // FP066: a good fix outside every ring stops the watch
+    if (nearWatchStage == FolloRules.WatchStage.OFF) return
     val beyond = locationProcessor.outsideHeldSearchM(l)
     if (FolloRules.watchStarts(beyond, l.accuracy)) {
       Timber.i("near-circle watch: inside (${l.accuracy.toInt()} m), starting as a circle crossing would")
@@ -1067,10 +1151,35 @@ class BackgroundService : LifecycleService(), Preferences.OnPreferenceChangeList
     if (requirementsChecker.hasLocationPermissions()) {
 
       withContext(ioDispatcher) {
-        val waypoints = waypointsRepo.getAll()
-        Timber.i("Setting up geofences for ${waypoints.size} waypoints")
+        val all = waypointsRepo.getAll()
+        // FP066 (23 Nov 2026): one approach ring per area (+ Basecamp); an area's own circles only while inside its ring
+        val rings = FolloRings.rings(locationProcessor.heldWakeCircles(), FolloRings.apprM(folloStatusRepoForRings.status.value?.message?.appr))
+        currentRings = rings
+        // a server refresh clears the circles for a moment (clearWaypoints, then setWaypoints): no rings at all = keep the
+        // state as it is, rather than forget it and wait for the OS to say ENTER again
+        val inside = if (rings.isEmpty()) folloRingRepo.inside.value else FolloRings.keepHeld(folloRingRepo.inside.value, rings)
+        if (inside != folloRingRepo.inside.value) folloRingRepo.set(inside)
+        val wake = all.filter { FolloRules.isWakeCircle(it.description, it.geofenceRadius) }
+        val (keptRings, circleIdx) =
+            FolloRings.plan(rings, inside, wake.map { FolloRules.wakeArea(it.description).orEmpty() }, lastLocation?.latitude, lastLocation?.longitude,
+                FolloRings.MAX_GEOFENCES - (all.size - wake.size))
+        val waypoints = all.filter { !FolloRules.isWakeCircle(it.description, it.geofenceRadius) } + circleIdx.map { wake[it] }
+        Timber.i("Setting up geofences: ${keptRings.size} rings (inside ${inside.size}), ${waypoints.size} of ${all.size} circles")
+        val ringFences =
+            keptRings.map {
+              Geofence(
+                  FolloRings.ringId(it.area),
+                  Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT,
+                  0,
+                  org.owntracks.android.location.geofencing.Latitude(it.lat),
+                  org.owntracks.android.location.geofencing.Longitude(it.lon),
+                  it.r.toFloat(),
+                  Geofence.NEVER_EXPIRE,
+                  null,
+              )
+            }
         val geofences =
-            waypoints
+            ringFences + waypoints
                 .map {
                   Geofence(
                       it.id.toString(),

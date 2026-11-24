@@ -19,6 +19,25 @@
         android:name="android.hardware.wifi"
         android:required="false" />
 
+    <!-- Photos & video (24 Nov 2026): the app's own video screen records the original at 1080p H.264 (CameraX).
+         Not required: phones without a camera / microphone can still install the app. -->
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+    <!-- the video screen is portrait-only; that must not hide the app from landscape-only devices on Play -->
+    <uses-feature
+        android:name="android.hardware.screen.portrait"
+        android:required="false" />
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- To access the network -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -64,6 +83,16 @@
         tools:replace="android:allowBackup">
 
         <!-- Disables default initialization of WorkManager because custom initializer is used in App.onCreate()-->
+        <!-- Photos & video (23 Nov 2026): the system camera writes the shot here (cache/follo_capture only) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/follo_photo_paths" />
+        </provider>
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -100,6 +129,14 @@
                     android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <!-- Photos & video (24 Nov 2026): the app's own minimal video screen (1080p H.264 originals) -->
+        <activity
+            android:name=".ui.main.FolloVideoActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Owntracks"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity" />
 
         <service
             android:name=".services.BackgroundService"

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only place the camera app may write to: one shot at a time, moved into the app's no-backup store on Keep -->
+<paths>
+    <cache-path name="capture" path="follo_capture/" />
+</paths>

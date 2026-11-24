@@ -55,6 +55,13 @@ class FolloMenuButton @JvmOverloads constructor(context: Context, attrs: Attribu
   var symbol: Drawable? = null
   /** The Labels button: a mini name tag with this text */
   var tag: String? = null
+  /** A small red count at the top right (the Photos button: items still to send), null = none (23 Nov 2026) */
+  var badge: String? = null
+    set(value) {
+      if (field == value) return
+      field = value
+      invalidate()
+    }
 
   private val density = resources.displayMetrics.density
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -166,6 +173,20 @@ class FolloMenuButton @JvmOverloads constructor(context: Context, attrs: Attribu
       c.drawCircle(cx, cy, r - ring / 2f, paint)
     }
     c.restore()
+    badge?.let { text ->
+      val br = 8f * side / 40f
+      val bx = cx + r - br
+      val by = cy - r + br
+      paint.style = Paint.Style.FILL
+      paint.color = BADGE
+      c.drawCircle(bx, by, br, paint)
+      paint.color = WHITE
+      paint.typeface = Typeface.DEFAULT_BOLD
+      paint.textSize = 10f * side / 40f
+      paint.textAlign = Paint.Align.CENTER
+      val fm = paint.fontMetrics
+      c.drawText(text, bx, by - (fm.ascent + fm.descent) / 2, paint)
+    }
   }
 
   companion object {
@@ -183,6 +204,22 @@ class FolloMenuButton @JvmOverloads constructor(context: Context, attrs: Attribu
     const val MAGENTA = -0xff01 // 0xFFFF00FF
     const val PIN = -0x174b00 // 0xFFE8B500
     const val INK = -0xeeeeef // 0xFF111111
+    const val BADGE = -0x3ef4f5 // 0xFFC10B0B
+
+    /** The 📷 button (23 Nov 2026) */
+    fun camera() =
+        listOf(
+            Shape("M3,8.5h4l1.6,-2.5h6.8L17,8.5h4v10.5H3z", stroke = TINT, width = 2f),
+            Shape("M8.6,13.6a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0z", stroke = TINT, width = 2f),
+        )
+
+    /** The Photos & video list button (23 Nov 2026): two pictures, one behind the other */
+    fun photos() =
+        listOf(
+            Shape("M7,4h14v11H7z", stroke = TINT, width = 1.8f),
+            Shape("M4,8v12h13", stroke = TINT, width = 1.8f),
+            Shape("M9,13l3,-3.5 2.4,2.6 1.6,-1.6 3,2.5", stroke = TINT, width = 1.5f),
+        )
 
     /** The "…" button */
     fun dots() =

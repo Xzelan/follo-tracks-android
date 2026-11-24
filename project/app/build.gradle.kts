@@ -16,7 +16,7 @@ apply<EspressoMetadataEmbeddingPlugin>()
 
 val gmsImplementation: Configuration by configurations.creating
 
-val versionNameValue = "0.1.49" // 22 Nov 2026 (later): the banner in "Share everywhere I go" is shorter, "Sharing location everywhere"; (0.1.48, 22 Nov 2026: other people's dots as on the live map (FP078), ghosts on a circle's edge gone + walking-only lines (FP079), three-state ticks (FP083), "Share everywhere I go"; (0.1.47, 20 Nov 2026: POI names show whenever the pins do; (0.1.46, 19 Nov 2026 (later): the simple screen: no card, two-way symbol in the banner, "…" button with layer buttons (tracklogs, grids, labels, hillshade, slope, contours, POI) and rotate, power, compass, searches; (0.1.45, 19 Nov 2026: search areas only (FP055): grey mask outside the circles, the last area on opening, "Waiting to arrive at your first search area"; (0.1.44, 18 Nov 2026 (later): the clean view keeps other phones' tracklogs; (0.1.43, 18 Nov 2026: phones-in-circles drop-down + every live-map search + clean view, on the phones the server names (status `all`); (0.1.42, 16 Nov 2026: compass heading pill (FP019), arrow at the middle of the whole screen (FP033), check-in when the offline map finishes or stops (FP034); (0.1.41, 15 Nov 2026 (later): checks in without a fix (the hello goes after 15 s), stale fix greyed; (0.1.40, 15 Nov 2026: MGA position pill, ticks app·ring·map, grey cells past U-turns, full-screen Always step (0.1.39, 14 Nov 2026: screen round 2 (power button on the card, ticks, position pill, sideways panels, rotate button) (0.1.38: compact screen + power button)))))
+val versionNameValue = "0.1.50" // 23 Nov 2026: photos & video from the field (📷: thumb at once, bigger copy when basecamp asks, original on Wi-Fi); (0.1.49, 22 Nov 2026 (later): the banner in "Share everywhere I go" is shorter, "Sharing location everywhere"; (0.1.48, 22 Nov 2026: other people's dots as on the live map (FP078), ghosts on a circle's edge gone + walking-only lines (FP079), three-state ticks (FP083), "Share everywhere I go"; (0.1.47, 20 Nov 2026: POI names show whenever the pins do; (0.1.46, 19 Nov 2026 (later): the simple screen: no card, two-way symbol in the banner, "…" button with layer buttons (tracklogs, grids, labels, hillshade, slope, contours, POI) and rotate, power, compass, searches; (0.1.45, 19 Nov 2026: search areas only (FP055): grey mask outside the circles, the last area on opening, "Waiting to arrive at your first search area"; (0.1.44, 18 Nov 2026 (later): the clean view keeps other phones' tracklogs; (0.1.43, 18 Nov 2026: phones-in-circles drop-down + every live-map search + clean view, on the phones the server names (status `all`); (0.1.42, 16 Nov 2026: compass heading pill (FP019), arrow at the middle of the whole screen (FP033), check-in when the offline map finishes or stops (FP034); (0.1.41, 15 Nov 2026 (later): checks in without a fix (the hello goes after 15 s), stale fix greyed; (0.1.40, 15 Nov 2026: MGA position pill, ticks app·ring·map, grey cells past U-turns, full-screen Always step (0.1.39, 14 Nov 2026: screen round 2 (power button on the card, ticks, position pill, sideways panels, rotate button) (0.1.38: compact screen + power button)))))
 // Second build of the same version (21 Oct 2026: diagnostics in every post); the first 0.1.7 code
 // was never uploaded
 val versionBuild = 0 // 2 Nov 2026
@@ -270,6 +270,18 @@ dependencies {
 
   // Connectivity
   implementation(libs.okhttp)
+  // Photos & video from the field (23 Nov 2026): AVIF thumbs/previews (avif-coder: Apache-2.0 / BSD-3, no GPL parts),
+  // H.264 video previews (Media3 Transformer, Apache-2.0)
+  implementation(libs.avif.coder)
+  implementation(libs.media3.transformer)
+  implementation(libs.media3.effect)
+  implementation(libs.media3.common)
+  // The app's own video screen (24 Nov 2026): CameraX records the ORIGINAL at 1080p H.264 (Apache-2.0)
+  implementation(libs.camerax.core)
+  implementation(libs.camerax.camera2)
+  implementation(libs.camerax.lifecycle)
+  implementation(libs.camerax.video)
+  implementation(libs.camerax.view)
 
   // FOLLO push "check in" (29 Oct 2026): Firebase Cloud Messaging, initialised in code
   // (App.onCreate)

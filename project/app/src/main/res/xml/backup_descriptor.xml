@@ -9,5 +9,9 @@
     <!-- and the last server status, which names teammates' location topics (review B4, 28 Oct 2026) -->
     <exclude domain="sharedpref" path="follo_status.xml"/>
     <exclude domain="sharedpref" path="au.org.follo.tracks_preferences.xml"/>
+    <!-- FOLLO: never restored (24 Nov 2026: a reinstall came back in "Share everywhere" without the OK) -->
+    <exclude domain="sharedpref" path="follo_everywhere.xml"/>
+    <exclude domain="sharedpref" path="follo_rings.xml"/>
+    <exclude domain="sharedpref" path="follo_watch.xml"/>
     <exclude domain="external" />
 </full-backup-content>

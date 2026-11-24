@@ -73,6 +73,7 @@ import org.owntracks.android.services.BackgroundService
 import org.owntracks.android.services.LocationProcessor
 import org.owntracks.android.support.ContactImageBindingAdapter
 import org.owntracks.android.support.FolloEverywhere
+import org.owntracks.android.support.FolloPhotoRules
 import org.owntracks.android.support.FolloPower
 import org.owntracks.android.support.RequirementsChecker
 import org.owntracks.android.ui.NotificationsStash
@@ -109,6 +110,8 @@ class MainActivity :
   @Inject lateinit var notificationsStash: NotificationsStash
   @Inject lateinit var contactImageBindingAdapter: ContactImageBindingAdapter
   @Inject lateinit var locationProcessor: LocationProcessor
+  @Inject lateinit var folloPhotoRepo: org.owntracks.android.data.repos.FolloPhotoRepo
+  @Inject lateinit var folloStatusRepo: org.owntracks.android.data.repos.FolloStatusRepo
 
   private val viewModel: MainViewModel by viewModels()
   private lateinit var binding: ActivityMainBinding
@@ -208,6 +211,18 @@ class MainActivity :
             render()
           },
       )
+
+  /** Photos & video (23 Nov 2026): the 📷 button's screens; a field, so its camera launchers register before onCreate. */
+  private val photoUi =
+      FolloPhotoUi(
+          this,
+          { folloPhotoRepo },
+          { viewModel.currentLocation.value },
+          { if (::compass.isInitialized) compass.pillHeading()?.let { FolloRules.headingDegrees(it).toDouble() } else null },
+      )
+  /** The 📷 button (bottom right, above the position pill) */
+  private lateinit var cameraButton: FolloMenuButton
+  private var cameraShown = false
 
   private val settingsLauncher =
       registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -459,6 +474,8 @@ class MainActivity :
           }
         }
         launch { folloDrawRepo.draw.collect(::showDrawings) }
+        launch { folloPhotoRepo.items.collect { renderMenu() } } // the Photos button's count (23 Nov 2026)
+        launch { folloStatusRepo.status.collect { renderMenu() } } // `pho` on / off: the 📷 button
         launch { viewModel.trackUpdates.collect(::drawTrack) }
         launch { viewModel.displayNameState.collect { render() } }
         // "Share everywhere I go" (22 Nov 2026): the switch, wherever it was thrown (here, or by the server's status)
@@ -591,7 +608,8 @@ class MainActivity :
    * The things over the map (14 Nov 2026; 19 Nov the simple screen). Upright: the recentre button top left and the "…"
    * button top right, 10 dp under the banner. Sideways: the recentre button top left under the status bar, the "…"
    * button level with it just left of the status panel. The position pill just above the bottom band on the right
-   * (above the notices when one shows), the heading pill level with it on the left; the column under "…".
+   * (above the notices when one shows), the heading pill straight above it, the 📷 button bottom left (24 Nov 2026); the
+   * column under "…".
    */
   private fun placeOverlays() {
     if (!::binding.isInitialized) return
@@ -626,19 +644,29 @@ class MainActivity :
           marginEnd = right
         }
       }
-      // The heading pill: on the left, level with the position pill. If the two would come closer than 8 dp, it sits
-      // straight above the position pill instead (spec §5 of 15 Nov).
+      // The heading pill: bottom RIGHT, straight above the position pill, 8 dp gap (Alex 24 Nov 2026: the 📷 button took
+      // the bottom left). No position pill showing = in the position pill's own place.
       val left = dp(16f) + if (land) barsLeft else 0
-      val coordsW = if (binding.coords.visibility == View.VISIBLE) binding.coords.width.toFloat() else 0f
-      val stack = FolloRules.pillsStack((binding.root.width - left - right).toFloat(), widestHeadingPx(), coordsW, dp(8f).toFloat())
-      val hGravity = if (stack) Gravity.BOTTOM or Gravity.END else Gravity.BOTTOM or Gravity.START
-      val hBottom = if (stack) above + binding.coords.height + dp(8f) else above
+      val coordsShown = binding.coords.visibility == View.VISIBLE
+      val hGravity = Gravity.BOTTOM or Gravity.END
+      val hBottom = if (coordsShown) above + binding.coords.height + dp(8f) else above
       binding.heading.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
         if (gravity != hGravity || bottomMargin != hBottom || marginStart != left || marginEnd != right) {
           gravity = hGravity
           bottomMargin = hBottom
           marginStart = left
           marginEnd = right
+        }
+      }
+      // the 📷 button: bottom LEFT of the map, 8 dp above the notices / bottom band, level with the notices' left edge
+      // (Alex 24 Nov 2026; the footer stays as it is)
+      if (::cameraButton.isInitialized) {
+        cameraButton.updateLayoutParams<android.widget.FrameLayout.LayoutParams> {
+          if (bottomMargin != above || marginStart != left || gravity != (Gravity.BOTTOM or Gravity.START)) {
+            gravity = Gravity.BOTTOM or Gravity.START
+            bottomMargin = above
+            marginStart = left
+          }
         }
       }
       placeMenu(top, end, above)
@@ -651,12 +679,6 @@ class MainActivity :
   /** The bottom band's height: its row plus the navigation bar under it. */
   private fun bandHeight(): Int =
       binding.creditBar.height.takeIf { it > 0 } ?: (dp(4f + 18f) + barsBottom + dp(if (isLand()) 5f else 4f))
-
-  /** The heading pill at its widest ("359°  WNW"), so it never flips between beside and above as the text changes. */
-  private fun widestHeadingPx(): Float {
-    val v = binding.heading
-    return v.paint.measureText("359°  WNW") + v.paddingStart + v.paddingEnd + v.compoundDrawablePadding + dp(16f)
-  }
 
   override fun onSaveInstanceState(outState: Bundle) {
     super.onSaveInstanceState(outState)
@@ -3608,6 +3630,19 @@ class MainActivity :
     }
     functionButtons[FolloMenu.Function.SEARCHES] = searchesButton
     add(searchesButton, getString(R.string.follo_fn_searches))
+    // Photos & video (23 Nov 2026): the list under "…", with a red count of what is still to send
+    val photosButton = FolloMenuButton(this)
+    photosButton.shapes = FolloMenuButton.photos()
+    photosButton.setOnClickListener { photoUi.showList() }
+    functionButtons[FolloMenu.Function.PHOTOS] = photosButton
+    add(photosButton, "Photos and video")
+    // the 📷 button itself, on the map at the bottom left (24 Nov 2026), one tap from the field
+    cameraButton = FolloMenuButton(this)
+    cameraButton.shapes = FolloMenuButton.camera()
+    cameraButton.contentDescription = "Take a photo or video for basecamp"
+    cameraButton.visibility = View.GONE
+    cameraButton.setOnClickListener { photoUi.capture() }
+    binding.root.addView(cameraButton, at, android.widget.FrameLayout.LayoutParams(dp(40f), dp(40f), Gravity.BOTTOM or Gravity.START))
   }
 
   private fun layerName(l: FolloMenu.Layer): String =
@@ -3666,7 +3701,7 @@ class MainActivity :
           off && kind == Kind.OFF && !clean -> listOf(FolloMenu.Function.POWER)
           !open -> emptyList()
           scopeCovered -> listOf(FolloMenu.Function.POWER, FolloMenu.Function.SEARCHES) // WAITING: no map
-          else -> FolloMenu.Function.entries
+          else -> FolloMenu.Function.entries.filter { it != FolloMenu.Function.PHOTOS || photosOffered() }
         }
     fun vis(v: View, show: Boolean) {
       val want = if (show) View.VISIBLE else View.GONE
@@ -3684,6 +3719,15 @@ class MainActivity :
     for ((f, v) in functionButtons) vis(v, f in functions)
     (functionButtons[FolloMenu.Function.COMPASS] as? FolloMenuButton)?.on = compassOn
     (functionButtons[FolloMenu.Function.SEARCHES] as? FolloMenuButton)?.on = searchesOn
+    (functionButtons[FolloMenu.Function.PHOTOS] as? FolloMenuButton)?.badge = folloPhotoRepo.waiting().takeIf { it > 0 }?.let { if (it > 9) "9+" else "$it" }
+    // the 📷 button: while the server takes photos and the phone is in a search (or sharing everywhere)
+    val st = folloStatusRepo.status.value?.message
+    val cam = showMore && !scopeCovered && FolloPhotoRules.buttonShown(st?.pho?.on == 1, st?.state, FolloEverywhere.isOn)
+    if (::cameraButton.isInitialized) vis(cameraButton, cam)
+    if (cam != cameraShown) {
+      cameraShown = cam
+      binding.root.post { placeOverlays() }
+    }
     powerButton.off = off
     menuShown = layers.mapNotNull { layerButtons[it] } + functions.mapNotNull { functionButtons[it] }
     menuLayerCount = layers.size
@@ -3719,7 +3763,9 @@ class MainActivity :
       return
     }
     val first = top + dp(40f + 10f)
-    val pillH = binding.coords.height.takeIf { it > 0 } ?: dp(29f)
+    // the position pill, and the heading pill on top of it when the compass is on (24 Nov 2026: the 📷 is bottom left now)
+    val pillH = (binding.coords.height.takeIf { it > 0 } ?: dp(29f)) +
+        if (binding.heading.visibility == View.VISIBLE) (binding.heading.height.takeIf { it > 0 } ?: dp(29f)) + dp(8f) else 0
     val avail = (binding.root.height - pillAbove - pillH - dp(8f) - first) / d
     val slots = FolloMenu.layout(menuLayerCount, menuShown.size - menuLayerCount, avail)
     for ((i, v) in menuShown.withIndex()) {
@@ -3734,6 +3780,10 @@ class MainActivity :
       }
     }
   }
+
+  /** The Photos list button: while the server takes photos, or while this phone holds any. */
+  private fun photosOffered(): Boolean =
+      folloStatusRepo.status.value?.message?.pho?.on == 1 || folloPhotoRepo.items.value.any { !it.del }
 
   /** A layer button was tapped: on / off, remembered. A hillshade or slope that still waits for Wi-Fi asks first. */
   private fun onLayerTapped(l: FolloMenu.Layer) {

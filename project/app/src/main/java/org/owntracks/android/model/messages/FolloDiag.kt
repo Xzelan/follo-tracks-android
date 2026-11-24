@@ -39,4 +39,6 @@ data class FolloDiag(
     @SerialName("of") val of: Int? = null,
     /** 1 while the app is turned Off with the power button (13 Nov 2026); absent otherwise. */
     @SerialName("off") val off: Int? = null,
+    /** FP066 (23 Nov 2026): how many approach rings the phone is in (no names, no distances). */
+    @SerialName("ar") val ar: Int? = null,
 )

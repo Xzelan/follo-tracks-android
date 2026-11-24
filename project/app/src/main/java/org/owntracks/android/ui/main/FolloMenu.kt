@@ -38,6 +38,8 @@ object FolloMenu {
     POWER,
     COMPASS,
     SEARCHES,
+    /** Photos & video (23 Nov 2026): this phone's list, with what is still to send */
+    PHOTOS,
   }
 
   /** Where one button of the column goes: [column] 0 = straight under "…", 1 = the next one to its left; [y] from the column's top. */

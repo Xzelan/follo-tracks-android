@@ -30,6 +30,7 @@ constructor(
     private val pushTokenRepo: PushTokenRepo,
     private val folloGridRepo: FolloGridRepo,
     private val folloOfflineRepo: FolloOfflineRepo,
+    private val folloRingRepo: FolloRingRepo,
 ) {
   @Volatile private var launchReason: String? = null
 
@@ -80,6 +81,7 @@ constructor(
         gv = folloGridRepo.heldVersion(),
         of = folloOfflineRepo.percent,
         off = if (org.owntracks.android.support.FolloPower.isOff) 1 else null,
+        ar = folloRingRepo.inside.value.size,
     )
   }
 
