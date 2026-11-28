@@ -14,8 +14,8 @@ import org.osmdroid.views.overlay.Overlay
  *   casing (Alex 13 Nov 2026: "It should have turned magenta and become part of all the other tracklogs"). Straight
  *   above the search grids, under the drawings.
  * - [Kind.TOP]: the chosen search's outline in its colour (18 Nov 2026), the watched phone's line in lime, and a dot per
- *   person ([FolloDots], 22 Nov 2026: the phones in circles AND this phone's team-mates, drawn alike). Over everything
- *   but this phone's own arrow.
+ *   person ([FolloDots], 22 Nov 2026: the phones in circles AND this phone's team-mates, drawn alike; half a metre
+ *   across on the ground since 0.1.52, [FolloScale]). Over everything but this phone's own arrow.
  * Display only: no taps.
  */
 class FolloWatchOverlay(private val kind: Kind, private val density: Float, scaledDensity: Float) : Overlay() {
@@ -54,10 +54,8 @@ class FolloWatchOverlay(private val kind: Kind, private val density: Float, scal
     when (kind) {
       Kind.LOGS -> {
         if (logs.isEmpty()) return
-        val pxPerMetre = p.metersToPixels(1f, p.currentCenter.latitude, p.zoomLevel)
-        val w = (1f * pxPerMetre).takeIf { it.isFinite() }?.coerceAtLeast(LOG_MIN_DP * density) ?: (LOG_MIN_DP * density)
         stroke.color = TRACK
-        stroke.strokeWidth = w
+        stroke.strokeWidth = FolloScale.trackWidthPx(p.metersToPixels(1f, p.currentCenter.latitude, p.zoomLevel), density)
         for (l in logs) drawLine(c, p, l, false, stroke, null)
       }
       Kind.TOP -> {
@@ -114,9 +112,10 @@ class FolloWatchOverlay(private val kind: Kind, private val density: Float, scal
   private fun drawDot(c: Canvas, p: Projection, d: FolloDots.Dot) {
     val x = p.getLongPixelXFromLongitude(d.lon).toFloat()
     val y = p.getLongPixelYFromLatitude(d.lat).toFloat()
-    val r = dotPainter.reach // the label may point any way on a turned map
+    val pxPerMetre = p.metersToPixels(1f, d.lat, p.zoomLevel) // half a metre on the ground WHERE THE DOT IS (FolloScale)
+    val r = dotPainter.reach(pxPerMetre) // the label may point any way on a turned map
     if (x + r < clip.left || x - r > clip.right || y + r < clip.top || y - r > clip.bottom) return
-    dotPainter.draw(c, x, y, p.orientation, d)
+    dotPainter.draw(c, x, y, p.orientation, pxPerMetre, d)
   }
 
   companion object {
@@ -126,6 +125,5 @@ class FolloWatchOverlay(private val kind: Kind, private val density: Float, scal
     const val LIME = -0x8900fd // 0xFF76FF03
     const val LIVE_DP = 3f
     const val OUTLINE_DP = 3f
-    const val LOG_MIN_DP = 0.5f
   }
 }

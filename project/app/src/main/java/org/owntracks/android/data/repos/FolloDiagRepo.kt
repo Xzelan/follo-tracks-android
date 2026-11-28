@@ -2,8 +2,12 @@ package org.owntracks.android.data.repos
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.Process
@@ -31,6 +35,7 @@ constructor(
     private val folloGridRepo: FolloGridRepo,
     private val folloOfflineRepo: FolloOfflineRepo,
     private val folloRingRepo: FolloRingRepo,
+    private val folloDeviceRepo: FolloDeviceRepo,
 ) {
   @Volatile private var launchReason: String? = null
 
@@ -62,6 +67,19 @@ constructor(
     val front = importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
     val push = pushTokenRepo.fdFields() // FOLLO push "check in" (29 Oct 2026)
+    val device = folloDeviceRepo.fdFields() // FP122 (28 Nov 2026): model + dual-band GPS, on some posts only
+    // 28 Nov 2026 (Alex, the Phones page's %Locked and °C columns): is the phone in someone's hand, and how hot is it.
+    // Neither needs a permission; both are read from the system as it stands (the battery broadcast is sticky).
+    val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    val lk = lockedFlag(runCatching { powerManager?.isInteractive }.getOrNull(), runCatching { keyguard?.isKeyguardLocked }.getOrNull())
+    val tc =
+        batteryCelsius(
+            runCatching {
+                  context
+                      .registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                      ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+                }
+                .getOrNull())
     return FolloDiag(
         fg = if (front) 1 else 0,
         au = au,
@@ -82,6 +100,10 @@ constructor(
         of = folloOfflineRepo.percent,
         off = if (org.owntracks.android.support.FolloPower.isOff) 1 else null,
         ar = folloRingRepo.inside.value.size,
+        lk = lk,
+        tc = tc,
+        md = device?.first,
+        l5 = device?.second,
     )
   }
 
@@ -89,5 +111,25 @@ constructor(
     /** "0.1.32", or "0.1.32 (1)" for a second build of the same version: what the heading shows (MainActivity). */
     fun appVersion(name: String = org.owntracks.android.BuildConfig.VERSION_NAME, build: Int = org.owntracks.android.BuildConfig.FOLLO_BUILD): String =
         if (build > 0) "$name ($build)" else name
+
+    /**
+     * fd.lk (28 Nov 2026): 1 = the screen is off or the lock screen is showing (nobody is looking at the phone), 0 = in
+     * use, null = the system told us neither. [interactive] is PowerManager.isInteractive, [keyguard] is
+     * KeyguardManager.isKeyguardLocked (true on a swipe-only lock screen too; a phone with no lock screen at all counts as
+     * locked only while its screen is off).
+     */
+    fun lockedFlag(interactive: Boolean?, keyguard: Boolean?): Int? =
+        when {
+          interactive == null && keyguard == null -> null
+          interactive == false || keyguard == true -> 1
+          else -> 0
+        }
+
+    /**
+     * fd.tc (28 Nov 2026): BatteryManager.EXTRA_TEMPERATURE is in tenths of a degree Celsius. Null when the extra is
+     * missing or is not a temperature a working phone can have (some report a huge or very negative placeholder).
+     */
+    fun batteryCelsius(tenths: Int?): Double? =
+        if (tenths == null || tenths <= -400 || tenths >= 1200) null else tenths / 10.0
   }
 }

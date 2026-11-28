@@ -64,4 +64,35 @@ class FolloDiagTest {
     val json = parser.toJsonPlain(MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 1, v = "0.1.32") })
     assertTrue(json, json.contains("\"v\":\"0.1.32\""))
   }
+
+  @Test
+  fun `fd says whether the phone is locked and how warm its battery is`() {
+    // 28 Nov 2026 (Alex): the Phones page's %Locked and °C columns
+    val repo = org.owntracks.android.data.repos.FolloDiagRepo
+    assertEquals(1, repo.lockedFlag(interactive = false, keyguard = true))    // screen off, locked
+    assertEquals(1, repo.lockedFlag(interactive = false, keyguard = false))   // screen off on a phone with no lock screen
+    assertEquals(1, repo.lockedFlag(interactive = true, keyguard = true))     // screen lit, still on the lock screen
+    assertEquals(0, repo.lockedFlag(interactive = true, keyguard = false))    // in use
+    assertEquals(1, repo.lockedFlag(interactive = false, keyguard = null))
+    assertEquals(0, repo.lockedFlag(interactive = true, keyguard = null))
+    assertEquals(1, repo.lockedFlag(interactive = null, keyguard = true))
+    assertNull(repo.lockedFlag(interactive = null, keyguard = null))
+
+    assertEquals(31.5, repo.batteryCelsius(315)!!, 0.0)
+    assertEquals(0.0, repo.batteryCelsius(0)!!, 0.0)
+    assertEquals(-5.0, repo.batteryCelsius(-50)!!, 0.0)
+    assertNull(repo.batteryCelsius(null))
+    assertNull(repo.batteryCelsius(Int.MIN_VALUE))   // the extra was missing
+    assertNull(repo.batteryCelsius(9999))
+
+    val json = parser.toJsonPlain(MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 0, lk = 1, tc = 31.5) })
+    assertTrue(json, json.contains("\"lk\":1"))
+    assertTrue(json, json.contains("\"tc\":31.5"))
+    val older = parser.toJsonPlain(MessageLocation().apply { timestamp = 1; trackerId = "IP"; fd = FolloDiag(fg = 0) })
+    assertFalse(older, older.contains("\"lk\""))
+    assertFalse(older, older.contains("\"tc\""))
+    val back = parser.fromJson("""{"_type":"location","lat":1,"lon":2,"tst":3,"tid":"IP","fd":{"fg":0,"lk":0,"tc":28.0}}""") as MessageLocation
+    assertEquals(0, back.fd?.lk)
+    assertEquals(28.0, back.fd?.tc!!, 0.0)
+  }
 }

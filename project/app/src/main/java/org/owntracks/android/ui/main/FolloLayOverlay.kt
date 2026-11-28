@@ -90,8 +90,7 @@ class FolloLayOverlay(private val kind: Kind, private val density: Float, scaled
       }
       Kind.TRACKLOGS -> {
         if (lines.isEmpty()) return
-        val pxPerMetre = p.metersToPixels(1f, p.currentCenter.latitude, zoom)
-        val w = pxPerMetre.takeIf { it.isFinite() }?.coerceAtLeast(LOG_MIN_DP * density) ?: (LOG_MIN_DP * density)
+        val w = FolloScale.trackWidthPx(p.metersToPixels(1f, p.currentCenter.latitude, zoom), density)
         stroke.color = FolloWatchOverlay.TRACK
         stroke.alpha = 255
         stroke.strokeWidth = w
@@ -178,7 +177,6 @@ class FolloLayOverlay(private val kind: Kind, private val density: Float, scaled
     const val CONTOUR_MIN_ZOOM = 13.0
     const val CONTOUR_LABEL_ZOOM = 16.0
     const val POI_MIN_ZOOM = 12.0
-    const val LOG_MIN_DP = 0.5f
     const val PIN = -0x174b00 // 0xFFE8B500
     const val INK = -0xeeeeef // 0xFF111111
   }

@@ -1634,8 +1634,7 @@ class MainActivity :
   private fun shareCheck() {
     val st = viewModel.folloStatus.value
     val off = folloOfflineRepo.state.value
-    val maker = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
-    val device = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) Build.MODEL else "$maker ${Build.MODEL}"
+    val device = org.owntracks.android.data.repos.FolloDeviceRepo.deviceName(Build.MANUFACTURER, Build.MODEL) // the same words the server gets (FP122)
     val version =
         if (BuildConfig.FOLLO_BUILD > 0) "${BuildConfig.VERSION_NAME} (${BuildConfig.FOLLO_BUILD})" else BuildConfig.VERSION_NAME
     val text =
@@ -2526,14 +2525,30 @@ class MainActivity :
   /** The track's last stretch, from its newest drawn point to the arrow, moved every frame of the glide (5 Nov 2026). */
   private var trackToArrow: Polyline? = null
 
+  /**
+   * A piece of this phone's own track: 1 m wide ON THE GROUND like every other tracklog (0.1.52, 28 Nov 2026: "Own
+   * track 1 m too"; it was 4 dp at every zoom). The width is worked out for the map's scale each time the line is
+   * drawn ([FolloScale.trackWidthPx], the map-centre latitude, as the other tracklog overlays do), so it follows a
+   * pinch and the app's own zooms frame by frame, and never goes under the tracklogs' small floor.
+   */
+  private inner class OwnTrackLine : Polyline(map) {
+    private val density = resources.displayMetrics.density
+
+    override fun draw(canvas: android.graphics.Canvas, projection: org.osmdroid.views.Projection) {
+      outlinePaint.strokeWidth =
+          FolloScale.trackWidthPx(projection.metersToPixels(1f, projection.currentCenter.latitude, projection.zoomLevel), density)
+      super.draw(canvas, projection)
+    }
+  }
+
   private fun trackLine(points: List<GeoPoint>) =
-      Polyline(map).apply {
+      OwnTrackLine().apply {
         id = TRACK_ID
         infoWindow = null
         isEnabled = ownShown() // hidden in the clean view (18 Nov 2026), and wherever FP055 shows nothing of this phone
         setPoints(points)
         outlinePaint.color = getColor(R.color.follo_track)
-        outlinePaint.strokeWidth = resources.displayMetrics.density * 4
+        outlinePaint.strokeWidth = FolloScale.TRACK_MIN_DP * resources.displayMetrics.density // until first drawn
         outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
         outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
       }
